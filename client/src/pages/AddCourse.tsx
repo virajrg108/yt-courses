@@ -1,226 +1,154 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useLocation } from 'wouter';
-import { useCourses } from '../contexts/CoursesContext';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { 
-  Form, 
-  FormControl, 
-  FormField, 
-  FormItem, 
-  FormLabel, 
-  FormMessage
-} from '../components/ui/form';
-import { Input } from '../components/ui/input';
-import { Button } from '../components/ui/button';
-import { ArrowLeft, Link2, PlusCircle, AlertCircle, Loader2, Clock, ListVideo } from 'lucide-react';
-import { Card, CardContent } from '../components/ui/card';
-import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
-import { Course } from '../types';
-import { formatDuration, getCourseFromPlaylist, extractPlaylistId } from '../lib/youtube';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { Loader2, AlertTriangle } from 'lucide-react';
+import Header from '../components/Header';
+import { useCourses } from '../contexts/CoursesContext';
+import { getCourseFromPlaylist, extractPlaylistId } from '../lib/youtube';
 
+// Form schema with validation
 const formSchema = z.object({
   playlistUrl: z.string()
-    .url({ message: 'Please enter a valid URL' })
-    .refine(
-      (url) => url.includes('youtube.com') || url.includes('youtu.be'), 
-      { message: 'Must be a YouTube URL' }
-    )
-    .refine(
-      (url) => !!extractPlaylistId(url),
-      { message: 'Must be a valid YouTube playlist URL with a list parameter' }
-    ),
-  customTitle: z.string().optional(),
+    .min(1, 'Playlist URL is required')
+    .refine((url) => extractPlaylistId(url) !== null, {
+      message: 'Invalid YouTube playlist URL'
+    }),
+  customTitle: z.string().optional()
 });
 
 type FormData = z.infer<typeof formSchema>;
 
 export default function AddCourse() {
-  const [_, navigate] = useLocation();
   const { addCourse } = useCourses();
-  
+  const [location, setLocation] = useLocation();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [coursePreview, setCoursePreview] = useState<Course | null>(null);
   
-  const form = useForm<FormData>({
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting }
+  } = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       playlistUrl: '',
-      customTitle: '',
-    },
+      customTitle: ''
+    }
   });
   
-  const handleBackClick = () => {
-    navigate('/');
-  };
-  
   const onSubmit = async (data: FormData) => {
+    setIsLoading(true);
+    setError(null);
+    
     try {
-      setIsLoading(true);
-      setError(null);
-      
-      // Fetch playlist data
+      // Get course data from YouTube API
       const course = await getCourseFromPlaylist(data.playlistUrl, data.customTitle);
-      setCoursePreview(course);
       
-      // Automatically add course after preview is shown
+      // Add course to database
       const success = await addCourse(course);
+      
       if (success) {
-        navigate('/');
+        // Navigate to the course page
+        setLocation(`/course/${course.id}`);
+      } else {
+        setError('This course has already been added');
       }
-    } catch (error) {
-      console.error('Error fetching playlist:', error);
-      setError(error instanceof Error ? error.message : 'Failed to fetch playlist information');
+    } catch (err) {
+      console.error('Error adding course:', err);
+      setError(err instanceof Error ? err.message : 'Failed to add course');
     } finally {
       setIsLoading(false);
     }
   };
   
   return (
-    <div>
-      <div className="flex items-center mb-6">
-        <button 
-          className="mr-3 text-gray-600 hover:text-primary"
-          onClick={handleBackClick}
-        >
-          <ArrowLeft className="h-5 w-5" />
-        </button>
-        <h2 className="text-2xl font-medium">Add New Course</h2>
-      </div>
+    <div className="flex min-h-screen flex-col">
+      <Header />
       
-      <Card className="max-w-2xl mx-auto">
-        <CardContent className="pt-6">
-          <p className="text-gray-600 mb-6">
-            Enter a YouTube playlist URL to add it as a course. YT Courses will automatically fetch the playlist details 
-            and add it to your courses library.
-          </p>
+      <main className="flex-1 container py-8">
+        <div className="mx-auto max-w-md">
+          <div className="mb-6 text-center">
+            <h1 className="text-3xl font-bold">Add New Course</h1>
+            <p className="text-muted-foreground mt-2">
+              Turn any YouTube playlist into a structured course
+            </p>
+          </div>
           
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              <FormField
-                control={form.control}
-                name="playlistUrl"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>YouTube Playlist URL</FormLabel>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                        <Link2 className="h-4 w-4 text-gray-400" />
-                      </div>
-                      <FormControl>
-                        <Input 
-                          placeholder="https://www.youtube.com/playlist?list=PLWKjhJtqVAbnRT_hue-3zyiuIYj0OlsyK" 
-                          className="pl-10"
-                          {...field}
-                        />
-                      </FormControl>
-                    </div>
-                    <p className="text-sm text-gray-500">
-                      Paste the full URL of a YouTube playlist
-                    </p>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <FormField
-                control={form.control}
-                name="customTitle"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Custom Course Name (Optional)</FormLabel>
-                    <FormControl>
-                      <Input 
-                        placeholder="Leave empty to use the original playlist title" 
-                        {...field}
-                      />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-              
-              <div className="flex justify-between items-center mt-6">
-                <Button 
-                  type="button" 
-                  variant="ghost"
-                  onClick={handleBackClick}
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  type="submit" 
-                  className="bg-primary hover:bg-primary/90"
-                  disabled={isLoading}
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Fetching...
-                    </>
-                  ) : (
-                    <>
-                      <PlusCircle className="h-4 w-4 mr-2" />
-                      Add Course
-                    </>
-                  )}
-                </Button>
-              </div>
-            </form>
-          </Form>
-          
-          {/* Loading state */}
-          {isLoading && (
-            <div className="mt-6 flex items-center justify-center p-4">
-              <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mr-3"></div>
-              <p>Fetching playlist information...</p>
-            </div>
-          )}
-          
-          {/* Preview */}
-          {coursePreview && (
-            <div className="mt-6 border-t pt-6">
-              <h3 className="font-medium text-lg mb-4">Course Preview</h3>
-              <div className="flex">
-                <img 
-                  src={coursePreview.thumbnail} 
-                  alt="Playlist thumbnail" 
-                  className="w-24 h-16 object-cover rounded-md mr-4"
-                />
-                <div>
-                  <h4 className="font-medium">{coursePreview.customTitle || coursePreview.title}</h4>
-                  <p className="text-sm text-gray-600">by {coursePreview.channelTitle}</p>
-                  <div className="flex items-center mt-1 text-sm text-gray-600">
-                    <ListVideo className="h-3 w-3 mr-1" />
-                    <span>{coursePreview.videos.length} videos</span>
-                    <span className="mx-2">•</span>
-                    <Clock className="h-3 w-3 mr-1" />
-                    <span>
-                      {formatDuration(
-                        coursePreview.videos.reduce((total, video) => total + video.duration, 0)
-                      )} total length
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-          
-          {/* Error state */}
+          {/* Error message */}
           {error && (
-            <Alert variant="destructive" className="mt-6">
-              <AlertCircle className="h-4 w-4" />
-              <AlertTitle>Error</AlertTitle>
-              <AlertDescription>
-                {error}
-              </AlertDescription>
-            </Alert>
+            <div className="bg-destructive/15 text-destructive p-4 rounded-lg mb-6 flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 flex-shrink-0 mt-0.5" />
+              <div>{error}</div>
+            </div>
           )}
-        </CardContent>
-      </Card>
+          
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+            {/* Playlist URL field */}
+            <div className="space-y-2">
+              <label htmlFor="playlistUrl" className="text-sm font-medium leading-none">
+                YouTube Playlist URL <span className="text-destructive">*</span>
+              </label>
+              <input
+                id="playlistUrl"
+                type="text"
+                className={`w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm ${
+                  errors.playlistUrl ? 'border-destructive' : ''
+                }`}
+                placeholder="https://www.youtube.com/playlist?list=PLxxxxxx"
+                {...register('playlistUrl')}
+              />
+              {errors.playlistUrl && (
+                <p className="text-sm text-destructive">{errors.playlistUrl.message}</p>
+              )}
+            </div>
+            
+            {/* Custom title field */}
+            <div className="space-y-2">
+              <label htmlFor="customTitle" className="text-sm font-medium leading-none">
+                Custom Title (Optional)
+              </label>
+              <input
+                id="customTitle"
+                type="text"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm"
+                placeholder="Enter a custom title for this course"
+                {...register('customTitle')}
+              />
+              <p className="text-xs text-muted-foreground">
+                If left empty, the original playlist title will be used
+              </p>
+            </div>
+            
+            {/* Form buttons */}
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                className="rounded-md px-4 py-2 text-sm border hover:bg-accent transition-colors"
+                onClick={() => setLocation('/')}
+                disabled={isLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="rounded-md bg-primary px-4 py-2 text-sm text-white hover:bg-primary/90 transition-colors flex items-center gap-2"
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Fetching playlist...
+                  </>
+                ) : (
+                  'Add Course'
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
+      </main>
     </div>
   );
 }
-
-

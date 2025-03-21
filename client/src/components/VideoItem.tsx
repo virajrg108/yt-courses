@@ -1,7 +1,6 @@
-import React from 'react';
-import { VideoWithProgress, VideoStatus } from '../types';
+import { Play, CheckCircle, Clock } from 'lucide-react';
 import { formatDuration } from '../lib/youtube';
-import { Play, Check, Clock } from 'lucide-react';
+import { VideoStatus, VideoWithProgress } from '../types';
 
 interface VideoItemProps {
   video: VideoWithProgress;
@@ -10,69 +9,71 @@ interface VideoItemProps {
 }
 
 export default function VideoItem({ video, isActive = false, onClick }: VideoItemProps) {
-  const handleClick = () => {
-    onClick(video.id);
+  // Get status text and color based on progress
+  const getStatusInfo = () => {
+    switch (video.status) {
+      case VideoStatus.COMPLETED:
+        return {
+          text: 'Completed',
+          icon: <CheckCircle className="h-3.5 w-3.5 text-green-500" />,
+          color: 'text-green-500'
+        };
+      case VideoStatus.IN_PROGRESS:
+        return {
+          text: `${Math.round(video.progress || 0)}% Complete`,
+          icon: <Play className="h-3.5 w-3.5 text-primary" />,
+          color: 'text-primary'
+        };
+      default:
+        return {
+          text: 'Not started',
+          icon: <Clock className="h-3.5 w-3.5 text-muted-foreground" />,
+          color: 'text-muted-foreground'
+        };
+    }
   };
-  
-  // Determine the status styles
-  let statusColor = 'bg-gray-200'; // Not started
-  let statusIcon = <span className="text-sm font-medium">{video.position + 1}</span>;
-  
-  if (video.status === VideoStatus.COMPLETED) {
-    statusColor = 'bg-green-500';
-    statusIcon = <Check className="h-4 w-4 text-white" />;
-  } else if (video.status === VideoStatus.IN_PROGRESS) {
-    statusColor = 'bg-amber-500';
-    statusIcon = <Play className="h-4 w-4 text-white" />;
-  }
-  
-  // Active item gets highlighted
-  const activeClass = isActive ? 'bg-blue-50' : 'hover:bg-gray-50';
+
+  const statusInfo = getStatusInfo();
   
   return (
-    <li 
-      className={`${activeClass} cursor-pointer transition-colors`}
-      onClick={handleClick}
+    <div 
+      className={`p-3 hover:bg-muted/50 cursor-pointer flex gap-3 transition-colors ${
+        isActive ? 'bg-muted' : ''
+      }`}
+      onClick={() => onClick(video.id)}
     >
-      <div className="p-4 flex items-center">
-        <div className="w-10 h-10 flex-shrink-0 mr-3">
-          <div className={`${statusColor} rounded-full w-8 h-8 flex items-center justify-center`}>
-            {statusIcon}
-          </div>
+      {/* Video thumbnail */}
+      <div className="relative flex-shrink-0">
+        <img 
+          src={video.thumbnail} 
+          alt={video.title} 
+          className="w-24 h-16 object-cover rounded-md" 
+        />
+        <div className="absolute bottom-1 right-1 bg-black/80 text-white text-[10px] px-1 rounded">
+          {formatDuration(video.duration)}
         </div>
-        <div className="flex-grow">
-          <h4 className="font-medium mb-1">
-            {`${video.position + 1}. ${video.title}`}
-          </h4>
+      </div>
+      
+      {/* Video info */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        <h4 className="font-medium text-sm line-clamp-2">{video.title}</h4>
+        
+        {/* Status indicator */}
+        <div className={`mt-auto text-xs flex items-center gap-1 ${statusInfo.color}`}>
+          {statusInfo.icon}
+          <span>{statusInfo.text}</span>
           
-          {video.status === VideoStatus.IN_PROGRESS && video.progress !== undefined ? (
-            <div className="flex flex-col">
-              <div className="flex items-center text-sm text-gray-600 mb-1">
-                <Clock className="h-3 w-3 mr-1" />
-                <span>{formatDuration(video.duration)}</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-1">
-                <div 
-                  className="bg-amber-500 h-1 rounded-full" 
-                  style={{ width: `${video.progress}%` }}
-                ></div>
-              </div>
+          {/* Progress bar for in-progress videos */}
+          {video.status === VideoStatus.IN_PROGRESS && (
+            <div className="w-full max-w-20 h-1 bg-muted-foreground/20 rounded-full overflow-hidden ml-1">
+              <div 
+                className="h-full bg-primary rounded-full" 
+                style={{ width: `${video.progress || 0}%` }}
+              />
             </div>
-          ) : (
-            <div className="flex items-center text-sm text-gray-600">
-              <Clock className="h-3 w-3 mr-1" />
-              <span>{formatDuration(video.duration)}</span>
-            </div>
-          )}
-        </div>
-        <div className="ml-3">
-          {video.status === VideoStatus.IN_PROGRESS ? (
-            <Play className="h-5 w-5 text-amber-500" />
-          ) : (
-            <Play className="h-5 w-5 text-gray-400" />
           )}
         </div>
       </div>
-    </li>
+    </div>
   );
 }

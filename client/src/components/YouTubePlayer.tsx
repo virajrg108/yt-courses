@@ -1,17 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { getVideoEmbedUrl, formatDuration } from '../lib/youtube';
+import { useEffect, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { VideoProgress } from '../types';
-import { 
-  Play, 
-  Pause, 
-  Volume2, 
-  VolumeX, 
-  Maximize, 
-  ChevronRight, 
-  ChevronLeft,
-  Check
-} from 'lucide-react';
-import { Button } from '../components/ui/button';
 
 interface YouTubePlayerProps {
   videoId: string;
@@ -27,7 +16,7 @@ interface YouTubePlayerProps {
   hasPrevious?: boolean;
 }
 
-// YouTube Player API interface
+// Extend window interface to include YouTube IFrame API
 declare global {
   interface Window {
     YT: {
@@ -53,339 +42,182 @@ export default function YouTubePlayer({
   onNextVideo,
   onPreviousVideo,
   hasNext = false,
-  hasPrevious = false
+  hasPrevious = false,
 }: YouTubePlayerProps) {
   const playerRef = useRef<any>(null);
-  const playerContainerRef = useRef<HTMLDivElement>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const progressIntervalRef = useRef<number | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const playerElementRef = useRef<HTMLDivElement>(null);
+  const timeUpdateIntervalRef = useRef<number | null>(null);
+  const [apiReady, setApiReady] = useState(false);
+  const [playerReady, setPlayerReady] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(false);
   
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(initialTime);
-  const [isMuted, setIsMuted] = useState(false);
-  const [progressPercentage, setProgressPercentage] = useState(
-    initialTime > 0 ? (initialTime / duration) * 100 : 0
-  );
-  const [isPlayerReady, setIsPlayerReady] = useState(false);
-  const [isCompleted, setIsCompleted] = useState(false);
-  
-  // Load YouTube API
+  // Load YouTube IFrame API
   useEffect(() => {
-    // Create script tag for YouTube iframe API
-    const tag = document.createElement('script');
-    tag.src = 'https://www.youtube.com/iframe_api';
-    const firstScriptTag = document.getElementsByTagName('script')[0];
-    firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
+    // Check if API script is already loaded
+    if (!document.getElementById('youtube-iframe-api')) {
+      // Create script element
+      const tag = document.createElement('script');
+      tag.id = 'youtube-iframe-api';
+      tag.src = 'https://www.youtube.com/iframe_api';
+      
+      // Insert script before first script tag
+      const firstScript = document.getElementsByTagName('script')[0];
+      firstScript.parentNode?.insertBefore(tag, firstScript);
+      
+      // Set up callback
+      window.onYouTubeIframeAPIReady = () => {
+        setApiReady(true);
+      };
+    } else if (window.YT && window.YT.Player) {
+      // API already loaded
+      setApiReady(true);
+    }
     
-    // Setup callback for when YouTube API loads
-    window.onYouTubeIframeAPIReady = initializePlayer;
-    
+    // Clean up interval on unmount
     return () => {
-      // Clean up
-      window.onYouTubeIframeAPIReady = () => {};
-      if (progressIntervalRef.current) {
-        window.clearInterval(progressIntervalRef.current);
-      }
-      if (playerRef.current) {
-        playerRef.current.destroy();
+      if (timeUpdateIntervalRef.current) {
+        window.clearInterval(timeUpdateIntervalRef.current);
+        timeUpdateIntervalRef.current = null;
       }
     };
   }, []);
   
-  // Initialize player when videoId changes
+  // Initialize player when API is ready and videoId changes
   useEffect(() => {
-    if (window.YT && window.YT.Player) {
-      initializePlayer();
-    }
+    if (!apiReady || !videoId || !playerElementRef.current) return;
     
-    // Reset state when video changes
-    setCurrentTime(initialTime);
-    setProgressPercentage(initialTime > 0 ? (initialTime / duration) * 100 : 0);
-    setIsCompleted(false);
-  }, [videoId, initialTime]);
-  
-  // Initialize player
-  const initializePlayer = () => {
-    if (!iframeRef.current) return;
-    
-    // Destroy existing player if it exists
+    // Clean up existing player
     if (playerRef.current) {
       playerRef.current.destroy();
+      playerRef.current = null;
     }
     
-    playerRef.current = new window.YT.Player(iframeRef.current, {
-      videoId,
+    // Create new player
+    playerRef.current = new window.YT.Player(playerElementRef.current, {
+      videoId: videoId,
       playerVars: {
-        start: Math.floor(initialTime),
-        rel: 0,
+        autoplay: 1,
         modestbranding: 1,
-        playsinline: 1
+        rel: 0,
+        start: Math.floor(initialTime || 0),
       },
       events: {
-        onReady: onPlayerReady,
-        onStateChange: onPlayerStateChange
-      }
+        onReady: () => {
+          setPlayerReady(true);
+        },
+        onStateChange: (event: any) => {
+          // Handle video complete
+          if (event.data === window.YT.PlayerState.ENDED) {
+            onVideoComplete();
+            
+            // Auto-play next video if available
+            if (hasNext && onNextVideo) {
+              setTimeout(() => {
+                onNextVideo();
+              }, 1500);
+            }
+          }
+        },
+      },
     });
-  };
-  
-  const onPlayerReady = () => {
-    setIsPlayerReady(true);
     
-    // Start progress tracking interval
-    startProgressTracking();
-    
-    // Set initial volume state
-    setIsMuted(playerRef.current.isMuted());
-    
-    // If there's initial time, seek to it
-    if (initialTime > 0) {
-      playerRef.current.seekTo(initialTime, true);
-    }
-  };
-  
-  const onPlayerStateChange = (event: any) => {
-    const playerState = event.data;
-    
-    if (playerState === window.YT.PlayerState.PLAYING) {
-      setIsPlaying(true);
-      startProgressTracking();
-    } else if (playerState === window.YT.PlayerState.PAUSED) {
-      setIsPlaying(false);
-      if (progressIntervalRef.current) {
-        window.clearInterval(progressIntervalRef.current);
-        progressIntervalRef.current = null;
-      }
-      // Save current progress when paused
-      saveProgress();
-    } else if (playerState === window.YT.PlayerState.ENDED) {
-      setIsPlaying(false);
-      setIsCompleted(true);
-      if (progressIntervalRef.current) {
-        window.clearInterval(progressIntervalRef.current);
-        progressIntervalRef.current = null;
-      }
-      
-      // Mark as completed when video ends
-      const progress: VideoProgress = {
-        videoId,
-        courseId,
-        currentTime: duration,
-        duration,
-        completed: true,
-        lastWatched: new Date().toISOString()
-      };
-      
-      onTimeUpdate(progress);
-      onVideoComplete();
-    }
-  };
-  
-  const startProgressTracking = () => {
-    if (progressIntervalRef.current) {
-      window.clearInterval(progressIntervalRef.current);
+    // Set up interval to update time
+    if (timeUpdateIntervalRef.current) {
+      window.clearInterval(timeUpdateIntervalRef.current);
     }
     
-    // Update progress every 5 seconds
-    progressIntervalRef.current = window.setInterval(() => {
-      if (playerRef.current && isPlayerReady) {
-        const newCurrentTime = playerRef.current.getCurrentTime();
-        setCurrentTime(newCurrentTime);
-        const newProgress = (newCurrentTime / duration) * 100;
-        setProgressPercentage(newProgress);
-        
-        // Save progress every 5 seconds
-        saveProgress();
+    timeUpdateIntervalRef.current = window.setInterval(() => {
+      if (playerRef.current?.getCurrentTime) {
+        try {
+          const currentTime = playerRef.current.getCurrentTime() || 0;
+          const videoDuration = playerRef.current.getDuration() || duration;
+          const progress: VideoProgress = {
+            videoId,
+            courseId,
+            currentTime,
+            duration: videoDuration,
+            completed: currentTime >= videoDuration * 0.95, // Mark as complete if watched 95%
+            lastWatched: new Date().toISOString(),
+          };
+          onTimeUpdate(progress);
+        } catch (error) {
+          console.error('Error updating time:', error);
+        }
       }
-    }, 5000);
-  };
+    }, 5000); // Update progress every 5 seconds
+    
+  }, [apiReady, videoId, initialTime, duration, courseId, onTimeUpdate, onVideoComplete, hasNext, onNextVideo]);
   
-  const saveProgress = () => {
-    if (!playerRef.current || !isPlayerReady) return;
-    
-    const currentPlayerTime = playerRef.current.getCurrentTime();
-    const isVideoCompleted = 
-      currentPlayerTime >= duration - 10 || // Consider completed if less than 10 seconds left
-      currentPlayerTime / duration >= 0.95; // Or if 95% watched
-    
-    const progress: VideoProgress = {
-      videoId,
-      courseId,
-      currentTime: currentPlayerTime,
-      duration,
-      completed: isVideoCompleted,
-      lastWatched: new Date().toISOString()
+  // Handle full screen changes
+  useEffect(() => {
+    const handleFullScreenChange = () => {
+      setIsFullScreen(Boolean(document.fullscreenElement));
     };
     
-    onTimeUpdate(progress);
-    
-    if (isVideoCompleted && !isCompleted) {
-      setIsCompleted(true);
-      onVideoComplete();
-    }
-  };
+    document.addEventListener('fullscreenchange', handleFullScreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullScreenChange);
+  }, []);
   
-  const togglePlayPause = () => {
-    if (!playerRef.current || !isPlayerReady) return;
+  // Toggle full screen
+  const toggleFullScreen = () => {
+    if (!containerRef.current) return;
     
-    if (isPlaying) {
-      playerRef.current.pauseVideo();
+    if (!document.fullscreenElement) {
+      containerRef.current.requestFullscreen().catch(err => {
+        console.error('Error attempting to enable full-screen mode:', err);
+      });
     } else {
-      playerRef.current.playVideo();
-    }
-  };
-  
-  const toggleMute = () => {
-    if (!playerRef.current || !isPlayerReady) return;
-    
-    if (isMuted) {
-      playerRef.current.unMute();
-      setIsMuted(false);
-    } else {
-      playerRef.current.mute();
-      setIsMuted(true);
-    }
-  };
-  
-  const handleFullscreen = () => {
-    if (!playerContainerRef.current) return;
-    
-    if (document.fullscreenElement) {
       document.exitFullscreen();
-    } else {
-      playerContainerRef.current.requestFullscreen();
     }
-  };
-  
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!playerRef.current || !isPlayerReady) return;
-    
-    const progressBar = e.currentTarget;
-    const rect = progressBar.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const percentage = x / rect.width;
-    const seekTime = percentage * duration;
-    
-    playerRef.current.seekTo(seekTime, true);
-    setCurrentTime(seekTime);
-    setProgressPercentage(percentage * 100);
-  };
-  
-  const handleMarkAsComplete = () => {
-    const progress: VideoProgress = {
-      videoId,
-      courseId,
-      currentTime: duration,
-      duration,
-      completed: true,
-      lastWatched: new Date().toISOString()
-    };
-    
-    onTimeUpdate(progress);
-    setIsCompleted(true);
-    onVideoComplete();
   };
   
   return (
-    <div className="w-full">
-      {/* Video player container */}
-      <div 
-        ref={playerContainerRef}
-        className="bg-dark rounded-lg shadow-lg overflow-hidden mb-4 relative"
-      >
-        <div className="relative aspect-video">
-          <iframe
-            ref={iframeRef}
-            className="absolute top-0 left-0 w-full h-full"
-            title={title}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowFullScreen
-          ></iframe>
-          
-          {/* Custom video controls overlay */}
-          <div className="absolute bottom-0 left-0 w-full bg-black bg-opacity-60 p-2 flex flex-col z-10">
-            <div className="flex items-center mb-1">
-              <button 
-                className="text-white mr-4" 
-                onClick={togglePlayPause}
-                aria-label={isPlaying ? "Pause" : "Play"}
-              >
-                {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
-              </button>
-              
-              <div 
-                className="flex-grow relative h-6 flex items-center cursor-pointer" 
-                onClick={handleSeek}
-              >
-                <div className="h-1 bg-gray-600 rounded-full w-full">
-                  <div 
-                    className="absolute top-[10px] left-0 h-1 bg-primary rounded-full" 
-                    style={{ width: `${progressPercentage}%` }}
-                  ></div>
-                </div>
-              </div>
-              
-              <div className="text-white text-sm ml-4">
-                {formatDuration(Math.floor(currentTime))} / {formatDuration(duration)}
-              </div>
-            </div>
-            
-            <div className="flex justify-between text-white text-sm">
-              <div className="flex">
-                <button 
-                  className="mr-4" 
-                  onClick={toggleMute} 
-                  aria-label={isMuted ? "Unmute" : "Mute"}
-                >
-                  {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-                </button>
-                
-                {/* Video navigation */}
-                <div className="flex items-center space-x-2">
-                  <button
-                    onClick={onPreviousVideo}
-                    disabled={!hasPrevious}
-                    className={`${!hasPrevious ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                    aria-label="Previous video"
-                  >
-                    <ChevronLeft className="h-5 w-5" />
-                  </button>
-                  
-                  <button
-                    onClick={onNextVideo}
-                    disabled={!hasNext}
-                    className={`${!hasNext ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                    aria-label="Next video"
-                  >
-                    <ChevronRight className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
-              
-              <div>
-                <button 
-                  className="ml-4" 
-                  onClick={handleFullscreen} 
-                  aria-label="Fullscreen"
-                >
-                  <Maximize className="h-5 w-5" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+    <div 
+      className="w-full overflow-hidden rounded-lg border bg-card shadow-sm"
+      ref={containerRef}
+    >
+      {/* Video title bar */}
+      <div className="bg-muted p-3 flex items-center justify-between">
+        <h3 className="font-medium text-sm truncate">{title}</h3>
       </div>
       
-      {/* Mark as complete button */}
-      <div className="flex justify-end mb-4">
-        <Button
-          onClick={handleMarkAsComplete}
-          disabled={isCompleted}
-          variant={isCompleted ? "secondary" : "default"}
-          className={`${isCompleted ? 'bg-green-500 hover:bg-green-500' : 'bg-green-500 hover:bg-green-600'} text-white rounded-full`}
-        >
-          <Check className="h-4 w-4 mr-1" />
-          {isCompleted ? "Completed" : "Mark as Complete"}
-        </Button>
+      {/* Player container */}
+      <div className="aspect-video bg-black relative">
+        <div ref={playerElementRef} className="absolute inset-0"></div>
+        
+        {/* Loading overlay */}
+        {!playerReady && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black">
+            <div className="w-12 h-12 border-4 border-primary/30 border-t-primary rounded-full animate-spin"></div>
+          </div>
+        )}
+        
+        {/* Navigation buttons overlay */}
+        <div className="absolute inset-0 pointer-events-none flex items-center justify-between px-4">
+          {/* Previous button */}
+          {hasPrevious && (
+            <button 
+              onClick={onPreviousVideo}
+              className="pointer-events-auto bg-black/70 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-black/90 transition-colors"
+            >
+              <ChevronLeft className="h-6 w-6" />
+            </button>
+          )}
+          
+          {/* Empty space */}
+          <div></div>
+          
+          {/* Next button */}
+          {hasNext && (
+            <button 
+              onClick={onNextVideo}
+              className="pointer-events-auto bg-black/70 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-black/90 transition-colors"
+            >
+              <ChevronRight className="h-6 w-6" />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

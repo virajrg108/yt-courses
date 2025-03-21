@@ -1,288 +1,186 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRoute, useLocation } from 'wouter';
+import { ArrowLeft, ListVideo, Loader2 } from 'lucide-react';
+import Header from '../components/Header';
 import { useCourses } from '../contexts/CoursesContext';
-import { VideoWithProgress, CourseWithProgress, VideoStatus } from '../types';
 import YouTubePlayer from '../components/YouTubePlayer';
 import VideoItem from '../components/VideoItem';
-import { formatDuration } from '../lib/youtube';
-import { ArrowLeft, Calendar, Clock } from 'lucide-react';
-import { Skeleton } from '../components/ui/skeleton';
-import { Textarea } from '../components/ui/textarea';
-import { Button } from '../components/ui/button';
+import { VideoWithProgress } from '../types';
 
 export default function VideoPlayer() {
-  const [_, navigate] = useLocation();
-  const [, params] = useRoute('/course/:courseId/video/:videoId');
-  const { 
-    getCourse, 
-    getVideo, 
-    updateVideoProgress, 
-    markVideoCompleted,
-    getNextVideo
-  } = useCourses();
+  const [match, params] = useRoute('/course/:courseId/video/:videoId');
+  const [location, setLocation] = useLocation();
+  const { getVideo, updateVideoProgress, markVideoCompleted, getNextVideo } = useCourses();
   
-  const [course, setCourse] = useState<CourseWithProgress | undefined>(undefined);
-  const [video, setVideo] = useState<VideoWithProgress | undefined>(undefined);
-  const [courseVideos, setCourseVideos] = useState<VideoWithProgress[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [notes, setNotes] = useState('');
+  const [currentVideo, setCurrentVideo] = useState<VideoWithProgress | null>(null);
+  const [courseVideos, setCourseVideos] = useState<VideoWithProgress[]>([]);
+  const [nextVideo, setNextVideo] = useState<VideoWithProgress | null>(null);
+  const [previousVideo, setPreviousVideo] = useState<VideoWithProgress | null>(null);
   
+  const courseId = params?.courseId;
+  const videoId = params?.videoId;
+  
+  // Load the current video, all course videos, and next/previous videos
   useEffect(() => {
-    if (!params?.courseId || !params?.videoId) {
-      navigate('/');
+    if (!courseId || !videoId) {
+      setLocation('/');
       return;
     }
     
-    loadVideoData(params.courseId, params.videoId);
-  }, [params?.courseId, params?.videoId]);
-  
-  const loadVideoData = async (courseId: string, videoId: string) => {
-    setIsLoading(true);
-    try {
-      const courseData = await getCourse(courseId);
-      if (!courseData) {
-        navigate('/');
-        return;
+    const loadVideoData = async () => {
+      setIsLoading(true);
+      
+      try {
+        // Load the current video
+        const video = await getVideo(courseId, videoId);
+        
+        if (!video) {
+          setLocation(`/course/${courseId}`);
+          return;
+        }
+        
+        setCurrentVideo(video);
+        
+        // Load the course and all its videos
+        const course = await useCourses().getCourse(courseId);
+        
+        if (!course) {
+          setLocation('/');
+          return;
+        }
+        
+        // Load all videos with their progress
+        const videoPromises = course.videos.map(v => 
+          getVideo(courseId, v.id)
+        );
+        
+        const loadedVideos = await Promise.all(videoPromises);
+        const filteredVideos = loadedVideos.filter(Boolean) as VideoWithProgress[];
+        setCourseVideos(filteredVideos);
+        
+        // Find current video index
+        const currentIndex = filteredVideos.findIndex(v => v.id === videoId);
+        
+        // Determine next and previous videos
+        if (currentIndex > 0) {
+          setPreviousVideo(filteredVideos[currentIndex - 1]);
+        } else {
+          setPreviousVideo(null);
+        }
+        
+        if (currentIndex < filteredVideos.length - 1) {
+          setNextVideo(filteredVideos[currentIndex + 1]);
+        } else {
+          setNextVideo(null);
+        }
+      } catch (error) {
+        console.error('Error loading video data:', error);
+      } finally {
+        setIsLoading(false);
       }
-      setCourse(courseData);
-      
-      const videoData = await getVideo(courseId, videoId);
-      if (!videoData) {
-        navigate(`/course/${courseId}`);
-        return;
-      }
-      setVideo(videoData);
-      
-      // Load all videos for the course with progress info
-      const videosWithProgress = await Promise.all(
-        courseData.videos.map(async (v) => {
-          const videoProgress = await getVideo(courseId, v.id);
-          return videoProgress || {
-            ...v,
-            status: VideoStatus.NOT_STARTED,
-            progress: 0
-          };
-        })
-      );
-      setCourseVideos(videosWithProgress);
-      
-      // Load saved notes (in a real app, this would come from IndexedDB)
-      const savedNotes = localStorage.getItem(`notes-${courseId}-${videoId}`) || '';
-      setNotes(savedNotes);
-    } catch (error) {
-      console.error('Error loading video data:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    };
+    
+    loadVideoData();
+  }, [courseId, videoId, getVideo, setLocation]);
   
-  const handleBackClick = () => {
-    if (params?.courseId) {
-      navigate(`/course/${params.courseId}`);
-    } else {
-      navigate('/');
-    }
-  };
-  
-  const handleVideoClick = (videoId: string) => {
-    if (params?.courseId) {
-      navigate(`/course/${params.courseId}/video/${videoId}`);
-    }
-  };
-  
+  // Handler for video progress updates
   const handleTimeUpdate = (progress: any) => {
     updateVideoProgress(progress);
   };
   
+  // Handler for video completion
   const handleVideoComplete = () => {
-    if (params?.courseId && params?.videoId) {
-      markVideoCompleted(params.courseId, params.videoId);
+    if (courseId && videoId) {
+      markVideoCompleted(courseId, videoId);
     }
   };
   
-  const handleSaveNotes = () => {
-    if (params?.courseId && params?.videoId) {
-      localStorage.setItem(`notes-${params.courseId}-${params.videoId}`, notes);
-    }
-  };
-  
-  const handleNextVideo = async () => {
-    if (!params?.courseId || !params?.videoId || !course) return;
-    
-    const nextVideo = await getNextVideo(params.courseId, params.videoId);
+  // Handler for navigating to next video
+  const handleNextVideo = () => {
     if (nextVideo) {
-      navigate(`/course/${params.courseId}/video/${nextVideo.id}`);
+      setLocation(`/course/${courseId}/video/${nextVideo.id}`);
     }
   };
   
+  // Handler for navigating to previous video
   const handlePreviousVideo = () => {
-    if (!params?.courseId || !params?.videoId || !course || !video) return;
-    
-    const currentIndex = course.videos.findIndex(v => v.id === params.videoId);
-    if (currentIndex > 0) {
-      const previousVideo = course.videos[currentIndex - 1];
-      navigate(`/course/${params.courseId}/video/${previousVideo.id}`);
+    if (previousVideo) {
+      setLocation(`/course/${courseId}/video/${previousVideo.id}`);
     }
   };
   
-  // Determine if there are next/previous videos
-  const currentIndex = course?.videos.findIndex(v => v.id === params?.videoId) || 0;
-  const hasNextVideo = course?.videos && currentIndex < course.videos.length - 1;
-  const hasPreviousVideo = currentIndex > 0;
+  // Handler for clicking on a video in the list
+  const handleVideoClick = (clickedVideoId: string) => {
+    setLocation(`/course/${courseId}/video/${clickedVideoId}`);
+  };
   
-  if (isLoading || !course || !video) {
+  if (isLoading || !currentVideo) {
     return (
-      <div>
-        <div className="flex items-center mb-4">
-          <button 
-            className="mr-3 text-gray-600 hover:text-primary"
-            onClick={handleBackClick}
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-          <div>
-            <Skeleton className="h-6 w-64 mb-1" />
-            <Skeleton className="h-4 w-48" />
-          </div>
-        </div>
+      <div className="flex min-h-screen flex-col">
+        <Header />
+        <main className="flex-1 container py-6 flex items-center justify-center">
+          <Loader2 className="h-8 w-8 text-primary animate-spin" />
+        </main>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="flex min-h-screen flex-col">
+      <Header />
+      
+      <main className="flex-1 container py-6">
+        {/* Back to course link */}
+        <button 
+          className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors mb-6"
+          onClick={() => setLocation(`/course/${courseId}`)}
+        >
+          <ArrowLeft className="h-4 w-4 mr-1" />
+          Back to course
+        </button>
         
-        <div className="flex flex-col lg:flex-row gap-6">
-          <div className="lg:w-3/4">
-            <Skeleton className="w-full aspect-video mb-4" />
-            <Skeleton className="h-10 w-full mb-6" />
-            
-            <div className="bg-white rounded-lg shadow-md p-4 mb-6">
-              <Skeleton className="h-6 w-3/4 mb-4" />
-              <Skeleton className="h-4 w-full mb-2" />
-              <Skeleton className="h-4 w-full mb-2" />
-              <Skeleton className="h-4 w-2/3 mb-4" />
-              <Skeleton className="h-8 w-1/3 ml-auto" />
-            </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Video player - takes up 2/3 on large screens */}
+          <div className="lg:col-span-2">
+            {courseId && currentVideo && (
+              <YouTubePlayer 
+                videoId={currentVideo.id}
+                courseId={courseId as string}
+                title={currentVideo.title}
+                initialTime={currentVideo.currentTime}
+                duration={currentVideo.duration}
+                onTimeUpdate={handleTimeUpdate}
+                onVideoComplete={handleVideoComplete}
+                onNextVideo={handleNextVideo}
+                onPreviousVideo={handlePreviousVideo}
+                hasNext={!!nextVideo}
+                hasPrevious={!!previousVideo}
+              />
+            )}
           </div>
           
-          <div className="lg:w-1/4">
-            <div className="bg-white rounded-lg shadow-md overflow-hidden">
-              <div className="p-3 border-b bg-gray-50">
-                <Skeleton className="h-5 w-32" />
-              </div>
-              <div className="max-h-[500px] overflow-y-auto">
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} className="p-3 border-b">
-                    <div className="flex items-center">
-                      <Skeleton className="h-8 w-8 rounded-full mr-2" />
-                      <div>
-                        <Skeleton className="h-4 w-36 mb-1" />
-                        <Skeleton className="h-3 w-16" />
-                      </div>
-                    </div>
-                  </div>
+          {/* Video list - takes up 1/3 on large screens */}
+          <div className="border rounded-lg overflow-hidden h-[calc(100vh-200px)] flex flex-col">
+            <div className="bg-muted p-3 font-medium border-b flex items-center">
+              <ListVideo className="h-4 w-4 mr-2" />
+              Course Videos
+            </div>
+            <div className="overflow-y-auto flex-1">
+              <div className="divide-y">
+                {courseVideos.map(video => (
+                  <VideoItem
+                    key={video.id}
+                    video={video}
+                    isActive={video.id === currentVideo.id}
+                    onClick={handleVideoClick}
+                  />
                 ))}
               </div>
             </div>
           </div>
         </div>
-      </div>
-    );
-  }
-  
-  const displayTitle = video.title;
-  const courseTitle = course.customTitle || course.title;
-  const formattedDate = new Date(video.publishedAt).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
-  });
-  
-  return (
-    <div>
-      <div className="flex items-center mb-4">
-        <button 
-          className="mr-3 text-gray-600 hover:text-primary"
-          onClick={handleBackClick}
-        >
-          <ArrowLeft className="h-5 w-5" />
-        </button>
-        <div>
-          <h2 className="text-xl font-medium">{`${video.position + 1}. ${displayTitle}`}</h2>
-          <p className="text-gray-600 text-sm">From: {courseTitle}</p>
-        </div>
-      </div>
-      
-      <div className="flex flex-col lg:flex-row gap-6">
-        <div className="lg:w-3/4">
-          {/* YouTube Player */}
-          <YouTubePlayer 
-            videoId={video.id}
-            courseId={course.id}
-            title={displayTitle}
-            initialTime={video.currentTime || 0}
-            duration={video.duration}
-            onTimeUpdate={handleTimeUpdate}
-            onVideoComplete={handleVideoComplete}
-            onNextVideo={hasNextVideo ? handleNextVideo : undefined}
-            onPreviousVideo={hasPreviousVideo ? handlePreviousVideo : undefined}
-            hasNext={hasNextVideo}
-            hasPrevious={hasPreviousVideo}
-          />
-          
-          {/* Video Information */}
-          <div className="bg-white rounded-lg shadow-md p-4 mb-6">
-            <h3 className="text-xl font-medium mb-2">{`${video.position + 1}. ${displayTitle}`}</h3>
-            <div className="flex flex-wrap justify-between items-center mb-4">
-              <div className="flex items-center">
-                <Calendar className="h-4 w-4 text-gray-600 mr-1" />
-                <span className="text-gray-600 text-sm mr-4">Published: {formattedDate}</span>
-              </div>
-              <div className="flex items-center">
-                <Clock className="h-4 w-4 text-gray-600 mr-1" />
-                <span className="text-gray-600 text-sm">Duration: {formatDuration(video.duration)}</span>
-              </div>
-            </div>
-            
-            <p className="text-gray-700 mb-4 line-clamp-3">
-              {video.description || 'No description available.'}
-            </p>
-          </div>
-          
-          {/* Video Notes */}
-          <div className="bg-white rounded-lg shadow-md p-4">
-            <h3 className="text-lg font-medium mb-2">My Notes</h3>
-            <Textarea 
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="w-full h-32 resize-none focus:outline-none focus:ring-2 focus:ring-secondary"
-              placeholder="Add your notes for this video..."
-            />
-            <div className="flex justify-end mt-2">
-              <Button 
-                onClick={handleSaveNotes}
-                className="bg-blue-500 hover:bg-blue-600 text-white"
-              >
-                Save Notes
-              </Button>
-            </div>
-          </div>
-        </div>
-        
-        {/* Up Next / Course Navigation */}
-        <div className="lg:w-1/4">
-          <div className="bg-white rounded-lg shadow-md overflow-hidden sticky top-20">
-            <div className="p-3 border-b bg-gray-50">
-              <h3 className="font-medium">Course Videos</h3>
-            </div>
-            <ul className="divide-y divide-gray-100 max-h-[500px] overflow-y-auto">
-              {courseVideos.map(v => (
-                <VideoItem 
-                  key={v.id}
-                  video={v}
-                  isActive={v.id === video.id}
-                  onClick={handleVideoClick}
-                />
-              ))}
-            </ul>
-          </div>
-        </div>
-      </div>
+      </main>
     </div>
   );
 }

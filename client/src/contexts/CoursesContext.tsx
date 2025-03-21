@@ -1,7 +1,6 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { Course, VideoProgress, CourseWithProgress, VideoWithProgress, VideoStatus } from "../types";
-import { db } from "../lib/db";
-import { useToast } from "../hooks/use-toast";
+import { ReactNode, createContext, useContext, useEffect, useState } from 'react';
+import { Course, CourseWithProgress, VideoProgress, VideoStatus, VideoWithProgress } from '../types';
+import { db } from '../lib/db';
 
 interface CoursesContextType {
   courses: CourseWithProgress[];
@@ -15,13 +14,13 @@ interface CoursesContextType {
   refreshCourses: () => Promise<void>;
 }
 
-const CoursesContext = createContext<CoursesContextType | undefined>(undefined);
+const CoursesContext = createContext<CoursesContextType | null>(null);
 
 export function CoursesProvider({ children }: { children: ReactNode }) {
   const [courses, setCourses] = useState<CourseWithProgress[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const { toast } = useToast();
 
+  // Load courses on initial mount
   useEffect(() => {
     loadCourses();
   }, []);
@@ -29,156 +28,186 @@ export function CoursesProvider({ children }: { children: ReactNode }) {
   const loadCourses = async () => {
     try {
       setIsLoading(true);
-      const storedCourses = await db.getAllCourses();
-      const progressData = await db.getAllVideoProgress();
-      
-      // Calculate course progress
-      const coursesWithProgress = storedCourses.map(course => {
-        const courseProgress = progressData.filter(p => p.courseId === course.id);
-        const completedVideos = courseProgress.filter(p => p.completed).length;
-        const percentage = course.videos.length > 0 
-          ? Math.round((completedVideos / course.videos.length) * 100) 
-          : 0;
-          
-        // Find current video (first incomplete video)
-        let currentVideoId;
-        if (percentage < 100) {
-          for (const video of course.videos) {
-            const videoProgress = courseProgress.find(p => p.videoId === video.id);
-            if (!videoProgress || !videoProgress.completed) {
-              currentVideoId = video.id;
-              break;
-            }
-          }
-        }
-        
-        return {
-          ...course,
-          progress: {
-            completedVideos,
-            totalVideos: course.videos.length,
-            percentage,
-            currentVideoId
-          }
-        };
-      });
-      
-      setCourses(coursesWithProgress);
+      await refreshCourses();
     } catch (error) {
-      console.error("Failed to load courses:", error);
-      toast({
-        title: "Error loading courses",
-        description: "Failed to load your courses. Please try again.",
-        variant: "destructive"
-      });
+      console.error('Error loading courses:', error);
     } finally {
       setIsLoading(false);
     }
   };
 
   const refreshCourses = async () => {
-    await loadCourses();
+    const allCourses = await db.getAllCourses();
+    const allProgress = await db.getAllVideoProgress();
+    
+    // Map to track video progress by course
+    const courseProgressMap = new Map<string, VideoProgress[]>();
+    
+    // Group video progress by course ID
+    allProgress.forEach(progress => {
+      if (!courseProgressMap.has(progress.courseId)) {
+        courseProgressMap.set(progress.courseId, []);
+      }
+      courseProgressMap.get(progress.courseId)?.push(progress);
+    });
+    
+    // Calculate course progress stats
+    const coursesWithProgress: CourseWithProgress[] = allCourses.map(course => {
+      const courseProgress = courseProgressMap.get(course.id) || [];
+      const totalVideos = course.videos.length;
+      const completedVideos = courseProgress.filter(p => p.completed).length;
+      const percentage = totalVideos > 0 ? Math.round((completedVideos / totalVideos) * 100) : 0;
+      
+      // Find most recently watched video
+      let currentVideoId: string | undefined = undefined;
+      if (courseProgress.length > 0) {
+        // Sort by last watched timestamp, most recent first
+        const sortedProgress = [...courseProgress].sort((a, b) => 
+          new Date(b.lastWatched).getTime() - new Date(a.lastWatched).getTime()
+        );
+        currentVideoId = sortedProgress[0].videoId;
+      }
+      
+      return {
+        ...course,
+        progress: {
+          completedVideos,
+          totalVideos,
+          percentage,
+          currentVideoId
+        }
+      };
+    });
+    
+    // Sort courses by last watched (most recent first)
+    const sortedCourses = [...coursesWithProgress].sort((a, b) => {
+      if (!a.lastWatched && !b.lastWatched) return 0;
+      if (!a.lastWatched) return 1;
+      if (!b.lastWatched) return -1;
+      return new Date(b.lastWatched).getTime() - new Date(a.lastWatched).getTime();
+    });
+    
+    setCourses(sortedCourses);
   };
 
+  // Add a new course
   const addCourse = async (course: Course): Promise<boolean> => {
     try {
+      // Check if course already exists
+      const existingCourse = await db.getCourse(course.id);
+      if (existingCourse) {
+        return false; // Course already exists
+      }
+      
+      // Add the course to the database
       await db.addCourse(course);
+      
+      // Refresh courses list
       await refreshCourses();
-      toast({
-        title: "Course added",
-        description: `"${course.title}" has been added to your courses.`
-      });
+      
       return true;
     } catch (error) {
-      console.error("Failed to add course:", error);
-      toast({
-        title: "Error adding course",
-        description: "Failed to add the course. Please try again.",
-        variant: "destructive"
-      });
+      console.error('Error adding course:', error);
       return false;
     }
   };
 
+  // Get a course with progress information
   const getCourse = async (id: string): Promise<CourseWithProgress | undefined> => {
-    return courses.find(course => course.id === id);
-  };
-
-  const getVideo = async (courseId: string, videoId: string): Promise<VideoWithProgress | undefined> => {
-    try {
-      const course = await getCourse(courseId);
-      if (!course) return undefined;
-      
-      const video = course.videos.find(v => v.id === videoId);
-      if (!video) return undefined;
-      
-      const progress = await db.getVideoProgress(videoId, courseId);
-      
-      let status = VideoStatus.NOT_STARTED;
-      let progressPercentage = 0;
-      
-      if (progress) {
-        if (progress.completed) {
-          status = VideoStatus.COMPLETED;
-          progressPercentage = 100;
-        } else if (progress.currentTime > 0) {
-          status = VideoStatus.IN_PROGRESS;
-          progressPercentage = Math.round((progress.currentTime / progress.duration) * 100);
-        }
-        
-        return {
-          ...video,
-          status,
-          progress: progressPercentage,
-          currentTime: progress.currentTime
-        };
-      }
-      
-      return { ...video, status, progress: 0 };
-    } catch (error) {
-      console.error("Failed to get video:", error);
-      toast({
-        title: "Error",
-        description: "Failed to load video information.",
-        variant: "destructive"
-      });
-      return undefined;
+    const course = courses.find(c => c.id === id);
+    if (course) return course;
+    
+    // If not in state, try to get from database and calculate progress
+    const dbCourse = await db.getCourse(id);
+    if (!dbCourse) return undefined;
+    
+    const courseProgress = await db.getVideoProgressByCourse(id);
+    const totalVideos = dbCourse.videos.length;
+    const completedVideos = courseProgress.filter(p => p.completed).length;
+    const percentage = totalVideos > 0 ? Math.round((completedVideos / totalVideos) * 100) : 0;
+    
+    let currentVideoId: string | undefined = undefined;
+    if (courseProgress.length > 0) {
+      const sortedProgress = [...courseProgress].sort((a, b) => 
+        new Date(b.lastWatched).getTime() - new Date(a.lastWatched).getTime()
+      );
+      currentVideoId = sortedProgress[0].videoId;
     }
+    
+    return {
+      ...dbCourse,
+      progress: {
+        completedVideos,
+        totalVideos,
+        percentage,
+        currentVideoId
+      }
+    };
   };
 
-  const getNextVideo = async (courseId: string, currentVideoId: string): Promise<VideoWithProgress | undefined> => {
+  // Get a video with its progress information
+  const getVideo = async (courseId: string, videoId: string): Promise<VideoWithProgress | undefined> => {
     const course = await getCourse(courseId);
     if (!course) return undefined;
     
-    const currentIndex = course.videos.findIndex(v => v.id === currentVideoId);
-    if (currentIndex === -1 || currentIndex === course.videos.length - 1) return undefined;
+    const video = course.videos.find(v => v.id === videoId);
+    if (!video) return undefined;
     
-    const nextVideo = course.videos[currentIndex + 1];
-    return getVideo(courseId, nextVideo.id);
+    const progress = await db.getVideoProgress(videoId, courseId);
+    
+    let status = VideoStatus.NOT_STARTED;
+    let currentTime: number | undefined = undefined;
+    let progressPercentage: number | undefined = undefined;
+    
+    if (progress) {
+      if (progress.completed) {
+        status = VideoStatus.COMPLETED;
+        progressPercentage = 100;
+      } else if (progress.currentTime > 0) {
+        status = VideoStatus.IN_PROGRESS;
+        currentTime = progress.currentTime;
+        progressPercentage = Math.round((progress.currentTime / progress.duration) * 100);
+      }
+    }
+    
+    return {
+      ...video,
+      status,
+      progress: progressPercentage,
+      currentTime
+    };
   };
 
+  // Update video progress
   const updateVideoProgress = async (progress: VideoProgress): Promise<void> => {
     try {
       await db.updateVideoProgress(progress);
       
-      // Update last watched time for course
+      // Update course lastWatched timestamp
       const course = await db.getCourse(progress.courseId);
       if (course) {
-        await db.updateCourse({
+        const updatedCourse = {
           ...course,
           lastWatched: new Date().toISOString()
-        });
+        };
+        await db.updateCourse(updatedCourse);
       }
       
+      // Refresh courses to update UI
       await refreshCourses();
     } catch (error) {
-      console.error("Failed to update video progress:", error);
+      console.error('Error updating video progress:', error);
     }
   };
 
+  // Mark a video as completed
   const markVideoCompleted = async (courseId: string, videoId: string): Promise<void> => {
     try {
-      const video = await getVideo(courseId, videoId);
+      const videoProgress = await db.getVideoProgress(videoId, courseId);
+      const video = courses
+        .find(c => c.id === courseId)
+        ?.videos.find(v => v.id === videoId);
+      
       if (!video) return;
       
       const progress: VideoProgress = {
@@ -190,37 +219,42 @@ export function CoursesProvider({ children }: { children: ReactNode }) {
         lastWatched: new Date().toISOString()
       };
       
-      await db.updateVideoProgress(progress);
-      await refreshCourses();
-      
-      toast({
-        title: "Video completed",
-        description: "Your progress has been saved."
-      });
+      await updateVideoProgress(progress);
     } catch (error) {
-      console.error("Failed to mark video as completed:", error);
-      toast({
-        title: "Error",
-        description: "Failed to mark video as completed.",
-        variant: "destructive"
-      });
+      console.error('Error marking video as completed:', error);
     }
   };
 
+  // Get the next video in a course
+  const getNextVideo = async (courseId: string, currentVideoId: string): Promise<VideoWithProgress | undefined> => {
+    const course = await getCourse(courseId);
+    if (!course) return undefined;
+    
+    // Find the current video
+    const currentIndex = course.videos.findIndex(v => v.id === currentVideoId);
+    if (currentIndex === -1 || currentIndex === course.videos.length - 1) {
+      return undefined; // Current video not found or already at the last video
+    }
+    
+    // Get the next video
+    const nextVideo = course.videos[currentIndex + 1];
+    return getVideo(courseId, nextVideo.id);
+  };
+
+  const contextValue: CoursesContextType = {
+    courses,
+    isLoading,
+    addCourse,
+    getCourse,
+    getVideo,
+    updateVideoProgress,
+    markVideoCompleted,
+    getNextVideo,
+    refreshCourses
+  };
+
   return (
-    <CoursesContext.Provider
-      value={{
-        courses,
-        isLoading,
-        addCourse,
-        getCourse,
-        getVideo,
-        updateVideoProgress,
-        markVideoCompleted,
-        getNextVideo,
-        refreshCourses
-      }}
-    >
+    <CoursesContext.Provider value={contextValue}>
       {children}
     </CoursesContext.Provider>
   );
@@ -228,8 +262,8 @@ export function CoursesProvider({ children }: { children: ReactNode }) {
 
 export function useCourses() {
   const context = useContext(CoursesContext);
-  if (context === undefined) {
-    throw new Error("useCourses must be used within a CoursesProvider");
+  if (!context) {
+    throw new Error('useCourses must be used within CoursesProvider');
   }
   return context;
 }

@@ -1,5 +1,3 @@
-import React from "react";
-
 interface ProgressCircleProps {
   percentage: number;
   size?: number;
@@ -10,61 +8,57 @@ interface ProgressCircleProps {
 
 export default function ProgressCircle({
   percentage,
-  size = 40,
-  strokeWidth = 3,
-  showText = true,
-  className = ""
+  size = 24,
+  strokeWidth = 2,
+  showText = false,
+  className = '',
 }: ProgressCircleProps) {
-  // Ensure percentage is between 0-100
-  const normalizedPercentage = Math.min(100, Math.max(0, percentage));
+  // Default to 0% if percentage is not defined or is invalid
+  const validPercentage = Number.isFinite(percentage) ? Math.max(0, Math.min(percentage, 100)) : 0;
   
-  // Calculate circle properties
-  const radius = (size / 2) - (strokeWidth / 2);
-  const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (normalizedPercentage / 100) * circumference;
-  
-  // Determine color based on percentage
-  let color = "#E0E0E0"; // not started
-  if (normalizedPercentage > 0) {
-    color = normalizedPercentage >= 100 ? "#4CAF50" : "#FFC107";
-  }
+  const radius = (size - strokeWidth) / 2;
+  const circumference = radius * 2 * Math.PI;
+  const strokeDashoffset = circumference - (validPercentage / 100) * circumference;
   
   return (
-    <svg width={size} height={size} className={`bg-white rounded-full shadow-md ${className}`}>
-      <circle 
-        cx={size / 2} 
-        cy={size / 2} 
-        r={radius} 
-        fill="white" 
-        stroke="#E0E0E0" 
-        strokeWidth={strokeWidth} 
-      />
-      <circle 
-        cx={size / 2} 
-        cy={size / 2} 
-        r={radius} 
-        fill="transparent" 
-        stroke={color} 
-        strokeWidth={strokeWidth} 
-        strokeDasharray={circumference} 
-        strokeDashoffset={strokeDashoffset} 
-        style={{ 
-          transform: "rotate(-90deg)",
-          transformOrigin: "50% 50%",
-          transition: "stroke-dashoffset 0.35s"
-        }} 
-      />
+    <div className={`relative inline-flex items-center justify-center ${className}`}>
+      <svg
+        className="transform -rotate-90"
+        width={size}
+        height={size}
+      >
+        {/* Background circle */}
+        <circle
+          className="text-muted-foreground/20"
+          strokeWidth={strokeWidth}
+          stroke="currentColor"
+          fill="transparent"
+          r={radius}
+          cx={size / 2}
+          cy={size / 2}
+        />
+        
+        {/* Progress circle */}
+        <circle
+          className="text-primary transition-all duration-300 ease-in-out"
+          strokeWidth={strokeWidth}
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeDashoffset}
+          strokeLinecap="round"
+          stroke="currentColor"
+          fill="transparent"
+          r={radius}
+          cx={size / 2}
+          cy={size / 2}
+        />
+      </svg>
+      
+      {/* Percentage text */}
       {showText && (
-        <text 
-          x={size / 2} 
-          y={size / 2 + 4} 
-          textAnchor="middle" 
-          fontSize={size / 4} 
-          fontWeight="500"
-        >
-          {normalizedPercentage}%
-        </text>
+        <div className="absolute inset-0 flex items-center justify-center font-medium text-[10px]">
+          {Math.round(validPercentage)}%
+        </div>
       )}
-    </svg>
+    </div>
   );
 }

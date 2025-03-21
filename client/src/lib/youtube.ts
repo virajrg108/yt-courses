@@ -1,10 +1,3 @@
-import { Course, Video } from '@/types';
-import { v4 as uuidv4 } from 'uuid';
-
-// API key should come from environment variable in a real-world scenario
-// For this PWA we'll use a public YouTube Data API key
-const API_KEY = 'AIzaSyAOd1siJTCLCkBSCXg-nFRrsJWb_U4-jRo';
-
 interface YouTubePlaylistItem {
   id: string;
   snippet: {
@@ -43,105 +36,141 @@ interface YouTubeVideoResponse {
   }[];
 }
 
-// Extract playlist ID from YouTube playlist URL
+// Extract playlist ID from a YouTube URL
 export function extractPlaylistId(url: string): string | null {
-  const regex = /[&?]list=([^&]+)/;
+  const regex = /[&?]list=([^&]+)/i;
   const match = url.match(regex);
   return match ? match[1] : null;
 }
 
-// Convert YouTube duration format (ISO 8601) to seconds
+// Parse ISO 8601 duration format to seconds
 export function parseDuration(duration: string): number {
-  const matches = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-  if (!matches) return 0;
+  const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
   
-  const hours = parseInt(matches[1] || '0', 10);
-  const minutes = parseInt(matches[2] || '0', 10);
-  const seconds = parseInt(matches[3] || '0', 10);
+  if (!match) return 0;
+  
+  const hours = parseInt(match[1] || '0', 10);
+  const minutes = parseInt(match[2] || '0', 10);
+  const seconds = parseInt(match[3] || '0', 10);
   
   return hours * 3600 + minutes * 60 + seconds;
 }
 
-// Format seconds as HH:MM:SS or MM:SS
+// Format seconds to HH:MM:SS
 export function formatDuration(seconds: number): string {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
   
-  if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  let result = '';
+  if (hrs > 0) {
+    result += `${hrs}:${mins < 10 ? '0' : ''}`;
   }
+  result += `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   
-  return `${minutes}:${secs.toString().padStart(2, '0')}`;
+  return result;
 }
 
-// Calculate time elapsed since a date
+// Convert publishedAt date to "time ago" format
 export function timeAgo(date: string): string {
   const now = new Date();
-  const pastDate = new Date(date);
-  const diff = now.getTime() - pastDate.getTime();
+  const past = new Date(date);
+  const diffMs = now.getTime() - past.getTime();
+  const diffSecs = Math.floor(diffMs / 1000);
+  const diffMins = Math.floor(diffSecs / 60);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+  const diffWeeks = Math.floor(diffDays / 7);
+  const diffMonths = Math.floor(diffDays / 30);
+  const diffYears = Math.floor(diffDays / 365);
   
-  const seconds = Math.floor(diff / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-  const weeks = Math.floor(days / 7);
-  const months = Math.floor(days / 30);
-  const years = Math.floor(days / 365);
-  
-  if (years > 0) return `${years} ${years === 1 ? 'year' : 'years'} ago`;
-  if (months > 0) return `${months} ${months === 1 ? 'month' : 'months'} ago`;
-  if (weeks > 0) return `${weeks} ${weeks === 1 ? 'week' : 'weeks'} ago`;
-  if (days > 0) return `${days} ${days === 1 ? 'day' : 'days'} ago`;
-  if (hours > 0) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
-  if (minutes > 0) return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;
-  
-  return 'Just now';
+  if (diffSecs < 60) {
+    return 'Just now';
+  } else if (diffMins < 60) {
+    return `${diffMins} ${diffMins === 1 ? 'minute' : 'minutes'} ago`;
+  } else if (diffHours < 24) {
+    return `${diffHours} ${diffHours === 1 ? 'hour' : 'hours'} ago`;
+  } else if (diffDays < 7) {
+    return `${diffDays} ${diffDays === 1 ? 'day' : 'days'} ago`;
+  } else if (diffWeeks < 4) {
+    return `${diffWeeks} ${diffWeeks === 1 ? 'week' : 'weeks'} ago`;
+  } else if (diffMonths < 12) {
+    return `${diffMonths} ${diffMonths === 1 ? 'month' : 'months'} ago`;
+  } else {
+    return `${diffYears} ${diffYears === 1 ? 'year' : 'years'} ago`;
+  }
 }
 
-// Fetch all playlist items (handles pagination)
+// Fetch all playlist items recursively (handling pagination)
 async function fetchAllPlaylistItems(playlistId: string): Promise<YouTubePlaylistItem[]> {
-  let allItems: YouTubePlaylistItem[] = [];
+  const apiKey = import.meta.env.VITE_YOUTUBE_API_KEY || 
+                 process.env.YOUTUBE_API_KEY || 
+                 import.meta.env.YOUTUBE_API_KEY;
+                 
+  if (!apiKey) {
+    throw new Error("YouTube API key is missing. Please provide a valid API key.");
+  }
+  
+  let items: YouTubePlaylistItem[] = [];
   let nextPageToken: string | undefined = undefined;
   
   do {
     const params = new URLSearchParams({
       part: 'snippet',
       maxResults: '50',
-      playlistId,
-      key: API_KEY,
-      ...(nextPageToken ? { pageToken: nextPageToken } : {})
+      playlistId: playlistId,
+      key: apiKey
     });
     
-    const response = await fetch(`https://www.googleapis.com/youtube/v3/playlistItems?${params}`);
+    if (nextPageToken) {
+      params.append('pageToken', nextPageToken);
+    }
+    
+    const response = await fetch(
+      `https://www.googleapis.com/youtube/v3/playlistItems?${params.toString()}`
+    );
     
     if (!response.ok) {
-      throw new Error(`Failed to fetch playlist: ${response.statusText}`);
+      throw new Error(`Failed to fetch playlist items: ${response.statusText}`);
     }
     
     const data: YouTubePlaylistResponse = await response.json();
-    allItems = [...allItems, ...data.items];
+    items = [...items, ...data.items];
     nextPageToken = data.nextPageToken;
     
   } while (nextPageToken);
   
-  return allItems;
+  return items;
 }
 
-// Fetch video details (durations)
+// Fetch video details (to get duration)
 async function fetchVideosDetails(videoIds: string[]): Promise<Record<string, number>> {
-  // Process in batches of 50 (API limit)
+  const apiKey = import.meta.env.VITE_YOUTUBE_API_KEY || 
+                 process.env.YOUTUBE_API_KEY || 
+                 import.meta.env.YOUTUBE_API_KEY;
+                 
+  if (!apiKey) {
+    throw new Error("YouTube API key is missing. Please provide a valid API key.");
+  }
+  
+  // Process in chunks of 50 (API limitation)
+  const chunks = [];
+  for (let i = 0; i < videoIds.length; i += 50) {
+    chunks.push(videoIds.slice(i, i + 50));
+  }
+  
   const durations: Record<string, number> = {};
   
-  for (let i = 0; i < videoIds.length; i += 50) {
-    const batch = videoIds.slice(i, i + 50);
+  for (const chunk of chunks) {
     const params = new URLSearchParams({
       part: 'contentDetails',
-      id: batch.join(','),
-      key: API_KEY
+      id: chunk.join(','),
+      key: apiKey
     });
     
-    const response = await fetch(`https://www.googleapis.com/youtube/v3/videos?${params}`);
+    const response = await fetch(
+      `https://www.googleapis.com/youtube/v3/videos?${params.toString()}`
+    );
     
     if (!response.ok) {
       throw new Error(`Failed to fetch video details: ${response.statusText}`);
@@ -157,15 +186,25 @@ async function fetchVideosDetails(videoIds: string[]): Promise<Record<string, nu
   return durations;
 }
 
-// Fetch playlist info
+// Fetch playlist info (thumbnail, title)
 async function fetchPlaylistInfo(playlistId: string) {
+  const apiKey = import.meta.env.VITE_YOUTUBE_API_KEY || 
+                 process.env.YOUTUBE_API_KEY || 
+                 import.meta.env.YOUTUBE_API_KEY;
+                 
+  if (!apiKey) {
+    throw new Error("YouTube API key is missing. Please provide a valid API key.");
+  }
+  
   const params = new URLSearchParams({
-    part: 'snippet,contentDetails',
+    part: 'snippet',
     id: playlistId,
-    key: API_KEY
+    key: apiKey
   });
   
-  const response = await fetch(`https://www.googleapis.com/youtube/v3/playlists?${params}`);
+  const response = await fetch(
+    `https://www.googleapis.com/youtube/v3/playlists?${params.toString()}`
+  );
   
   if (!response.ok) {
     throw new Error(`Failed to fetch playlist info: ${response.statusText}`);
@@ -173,60 +212,61 @@ async function fetchPlaylistInfo(playlistId: string) {
   
   const data = await response.json();
   
-  if (data.items.length === 0) {
-    throw new Error('Playlist not found');
+  if (!data.items || data.items.length === 0) {
+    throw new Error("Playlist not found or is private");
   }
   
-  return data.items[0];
+  return data.items[0].snippet;
 }
 
-// Main function to get course data from a playlist
-export async function getCourseFromPlaylist(playlistUrl: string, customTitle?: string): Promise<Course> {
+// Main function to get course data from a playlist URL
+export async function getCourseFromPlaylist(playlistUrl: string, customTitle?: string) {
   const playlistId = extractPlaylistId(playlistUrl);
   
   if (!playlistId) {
-    throw new Error('Invalid YouTube playlist URL');
+    throw new Error("Invalid playlist URL");
   }
   
-  // Fetch playlist info
+  // Fetch playlist metadata
   const playlistInfo = await fetchPlaylistInfo(playlistId);
   
-  // Fetch all playlist items
+  // Fetch playlist items
   const playlistItems = await fetchAllPlaylistItems(playlistId);
   
-  // Extract video IDs for batch fetching durations
+  // Get video IDs to fetch durations
   const videoIds = playlistItems.map(item => item.snippet.resourceId.videoId);
   
   // Fetch video durations
-  const durations = await fetchVideosDetails(videoIds);
+  const videoDurations = await fetchVideosDetails(videoIds);
   
-  // Create Video objects
-  const videos: Video[] = playlistItems.map(item => {
+  // Build the videos array
+  const videos = playlistItems.map(item => {
     const videoId = item.snippet.resourceId.videoId;
+    const thumbnails = item.snippet.thumbnails;
+    
     return {
       id: videoId,
       title: item.snippet.title,
-      thumbnail: item.snippet.thumbnails.high?.url || item.snippet.thumbnails.medium?.url || item.snippet.thumbnails.default.url,
       description: item.snippet.description,
-      duration: durations[videoId] || 0,
+      thumbnail: thumbnails.maxres?.url || 
+                 thumbnails.standard?.url || 
+                 thumbnails.high.url,
       publishedAt: item.snippet.publishedAt,
-      position: item.snippet.position
+      position: item.snippet.position,
+      duration: videoDurations[videoId] || 0
     };
   });
   
-  // Sort videos by position
-  videos.sort((a, b) => a.position - b.position);
-  
-  // Create Course object
-  const course: Course = {
-    id: uuidv4(),
-    title: playlistInfo.snippet.title,
+  // Create course object
+  const course = {
+    id: playlistId,
+    title: playlistInfo.title,
     customTitle: customTitle || undefined,
-    description: playlistInfo.snippet.description,
-    thumbnail: playlistInfo.snippet.thumbnails.high?.url || 
-               playlistInfo.snippet.thumbnails.medium?.url || 
-               playlistInfo.snippet.thumbnails.default.url,
-    channelTitle: playlistInfo.snippet.channelTitle,
+    description: playlistInfo.description,
+    thumbnail: playlistInfo.thumbnails.maxres?.url || 
+               playlistInfo.thumbnails.standard?.url || 
+               playlistInfo.thumbnails.high.url,
+    channelTitle: playlistInfo.channelTitle,
     playlistId,
     videos,
     createdAt: new Date().toISOString()
@@ -235,7 +275,7 @@ export async function getCourseFromPlaylist(playlistUrl: string, customTitle?: s
   return course;
 }
 
-// Generate YouTube video embed URL
+// Get YouTube video embed URL
 export function getVideoEmbedUrl(videoId: string): string {
-  return `https://www.youtube.com/embed/${videoId}?enablejsapi=1&rel=0&modestbranding=1`;
+  return `https://www.youtube.com/embed/${videoId}`;
 }

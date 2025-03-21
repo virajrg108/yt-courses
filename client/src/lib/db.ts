@@ -1,5 +1,5 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { Course, VideoProgress } from '@/types';
+import { Course, VideoProgress } from '../types';
 
 interface YTCoursesDB extends DBSchema {
   courses: {
@@ -8,7 +8,7 @@ interface YTCoursesDB extends DBSchema {
     indexes: { 'by-created': string };
   };
   videoProgress: {
-    key: string;
+    key: [string, string]; // Composite key: [videoId, courseId]
     value: VideoProgress;
     indexes: { 
       'by-course': string;
@@ -28,20 +28,23 @@ class Database {
     return openDB<YTCoursesDB>('yt-courses-db', 1, {
       upgrade(db) {
         // Create courses store
-        const coursesStore = db.createObjectStore('courses', { keyPath: 'id' });
-        coursesStore.createIndex('by-created', 'createdAt');
+        if (!db.objectStoreNames.contains('courses')) {
+          const coursesStore = db.createObjectStore('courses', { keyPath: 'id' });
+          coursesStore.createIndex('by-created', 'createdAt');
+        }
 
         // Create videoProgress store
-        const progressStore = db.createObjectStore('videoProgress', { 
-          keyPath: 'videoId' 
-        });
-        progressStore.createIndex('by-course', 'courseId');
-        progressStore.createIndex('by-video', 'videoId');
-      },
+        if (!db.objectStoreNames.contains('videoProgress')) {
+          const progressStore = db.createObjectStore('videoProgress', { 
+            keyPath: ['videoId', 'courseId'] 
+          });
+          progressStore.createIndex('by-course', 'courseId');
+          progressStore.createIndex('by-video', 'videoId');
+        }
+      }
     });
   }
 
-  // Courses CRUD operations
   async addCourse(course: Course): Promise<void> {
     const db = await this.db;
     await db.put('courses', course);
@@ -59,14 +62,22 @@ class Database {
 
   async deleteCourse(id: string): Promise<void> {
     const db = await this.db;
+    
+    // Delete the course
     await db.delete('courses', id);
     
-    // Delete all related video progress
-    const progressItems = await this.getVideoProgressByCourse(id);
+    // Delete associated video progress
     const tx = db.transaction('videoProgress', 'readwrite');
-    for (const item of progressItems) {
-      await tx.store.delete(item.videoId);
-    }
+    const courseTx = await tx.store.index('by-course').getAll(id);
+    
+    await Promise.all(
+      courseTx.map(progress => {
+        // Use IDBKeyRange for composite key
+        const keyRange = IDBKeyRange.only([progress.videoId, progress.courseId]);
+        return tx.store.delete(keyRange);
+      })
+    );
+    
     await tx.done;
   }
 
@@ -75,39 +86,21 @@ class Database {
     return db.getAllFromIndex('courses', 'by-created');
   }
 
-  // Video progress operations
   async updateVideoProgress(progress: VideoProgress): Promise<void> {
     const db = await this.db;
-    const key = progress.videoId;
-    
-    // Check if progress already exists
-    const existingProgress = await db.get('videoProgress', key);
-    
-    if (existingProgress) {
-      // Update existing progress
-      await db.put('videoProgress', {
-        ...existingProgress,
-        ...progress,
-        lastWatched: new Date().toISOString()
-      });
-    } else {
-      // Create new progress entry
-      await db.put('videoProgress', {
-        ...progress,
-        lastWatched: new Date().toISOString()
-      });
-    }
+    await db.put('videoProgress', progress);
   }
 
   async getVideoProgress(videoId: string, courseId: string): Promise<VideoProgress | undefined> {
     const db = await this.db;
-    return db.get('videoProgress', videoId);
+    // Use IDBKeyRange to create a composite key
+    const keyRange = IDBKeyRange.only([videoId, courseId]);
+    return db.get('videoProgress', keyRange);
   }
 
   async getVideoProgressByCourse(courseId: string): Promise<VideoProgress[]> {
     const db = await this.db;
-    const index = db.transaction('videoProgress').store.index('by-course');
-    return index.getAll(courseId);
+    return db.getAllFromIndex('videoProgress', 'by-course', courseId);
   }
 
   async getAllVideoProgress(): Promise<VideoProgress[]> {

@@ -1,209 +1,161 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRoute, useLocation } from 'wouter';
+import { BookOpen, CheckCircle, Clock, ListVideo, ArrowLeft, Loader2 } from 'lucide-react';
+import Header from '../components/Header';
 import { useCourses } from '../contexts/CoursesContext';
-import { VideoWithProgress, CourseWithProgress, VideoStatus } from '../types';
 import VideoItem from '../components/VideoItem';
-import ProgressCircle from '../components/ProgressCircle';
-import { formatDuration } from '../lib/youtube';
-import { ArrowLeft, User, ListVideo, CheckCircle, PlayCircle, Circle } from 'lucide-react';
-import { Skeleton } from '../components/ui/skeleton';
+import { formatDuration, timeAgo } from '../lib/youtube';
+import { VideoWithProgress } from '../types';
 
 export default function CourseDetails() {
-  const [_, navigate] = useLocation();
-  const [, params] = useRoute('/course/:id');
+  const [match, params] = useRoute('/course/:id');
+  const [location, setLocation] = useLocation();
   const { getCourse, getVideo } = useCourses();
-  
-  const [course, setCourse] = useState<CourseWithProgress | undefined>(undefined);
-  const [videos, setVideos] = useState<VideoWithProgress[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [videos, setVideos] = useState<VideoWithProgress[]>([]);
+  
+  const courseId = params?.id;
   
   useEffect(() => {
-    if (!params?.id) {
-      navigate('/');
+    if (!courseId) {
+      setLocation('/');
       return;
     }
     
-    loadCourseDetails(params.id);
-  }, [params?.id]);
-  
-  const loadCourseDetails = async (courseId: string) => {
-    setIsLoading(true);
-    try {
-      const courseData = await getCourse(courseId);
-      if (!courseData) {
-        navigate('/');
-        return;
+    const loadCourse = async () => {
+      setIsLoading(true);
+      
+      try {
+        const course = await getCourse(courseId);
+        
+        if (!course) {
+          setLocation('/');
+          return;
+        }
+        
+        // Load all videos with their progress
+        const videoPromises = course.videos.map(video => 
+          getVideo(courseId, video.id)
+        );
+        
+        const loadedVideos = await Promise.all(videoPromises);
+        setVideos(loadedVideos.filter(Boolean) as VideoWithProgress[]);
+      } catch (error) {
+        console.error('Error loading course:', error);
+      } finally {
+        setIsLoading(false);
       }
-      
-      setCourse(courseData);
-      
-      // Load video progress data for each video
-      const videosWithProgress: VideoWithProgress[] = await Promise.all(
-        courseData.videos.map(async (video) => {
-          const videoProgress = await getVideo(courseId, video.id);
-          return videoProgress || {
-            ...video,
-            status: VideoStatus.NOT_STARTED,
-            progress: 0
-          };
-        })
-      );
-      
-      setVideos(videosWithProgress);
-    } catch (error) {
-      console.error('Error loading course details:', error);
-    } finally {
-      setIsLoading(false);
+    };
+    
+    loadCourse();
+  }, [courseId, getCourse, getVideo, setLocation]);
+  
+  const handleVideoClick = (videoId: string) => {
+    setLocation(`/course/${courseId}/video/${videoId}`);
+  };
+  
+  // Find the current video (most recently watched or first in list)
+  const findCurrentVideo = (): VideoWithProgress | undefined => {
+    // First try videos in progress
+    const inProgressVideo = videos.find(v => v.currentTime && v.currentTime > 0 && !v.status);
+    if (inProgressVideo) return inProgressVideo;
+    
+    // Then try first non-completed video
+    const firstNonCompletedVideo = videos.find(v => !v.status);
+    if (firstNonCompletedVideo) return firstNonCompletedVideo;
+    
+    // Default to first video
+    return videos[0];
+  };
+  
+  // When clicking continue, go to current video
+  const handleContinue = () => {
+    const currentVideo = findCurrentVideo();
+    if (currentVideo) {
+      handleVideoClick(currentVideo.id);
     }
   };
   
-  const handleBackClick = () => {
-    navigate('/');
+  // Calculate course stats
+  const getTotalDuration = () => {
+    return videos.reduce((total, video) => total + video.duration, 0);
   };
   
-  const handleVideoClick = (videoId: string) => {
-    navigate(`/course/${params?.id}/video/${videoId}`);
-  };
-  
-  if (isLoading || !course) {
+  if (isLoading) {
     return (
-      <div>
-        <div className="flex items-center mb-6">
-          <button 
-            className="mr-3 text-gray-600 hover:text-primary"
-            onClick={handleBackClick}
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-          <Skeleton className="h-8 w-64" />
-        </div>
-        
-        <div className="flex flex-col lg:flex-row">
-          <div className="lg:w-1/3 mb-6 lg:mb-0 lg:pr-6">
-            <div className="bg-white rounded-lg shadow-md overflow-hidden mb-6">
-              <Skeleton className="h-48 w-full" />
-              <div className="p-4">
-                <Skeleton className="h-6 w-3/4 mb-2" />
-                <Skeleton className="h-4 w-full mb-4" />
-                <Skeleton className="h-4 w-full mb-4" />
-                <Skeleton className="h-4 w-2/3 mb-4" />
-                <Skeleton className="h-6 w-full mb-2" />
-              </div>
-            </div>
-          </div>
-          
-          <div className="lg:w-2/3 bg-white rounded-lg shadow-md overflow-hidden">
-            <div className="p-4 border-b">
-              <Skeleton className="h-6 w-32" />
-            </div>
-            <div className="p-2">
-              {[...Array(5)].map((_, i) => (
-                <div key={i} className="p-2">
-                  <div className="flex items-center">
-                    <Skeleton className="h-10 w-10 rounded-full mr-3" />
-                    <div className="flex-grow">
-                      <Skeleton className="h-5 w-2/3 mb-2" />
-                      <Skeleton className="h-3 w-1/4" />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+      <div className="flex min-h-screen flex-col">
+        <Header />
+        <main className="flex-1 container py-6 flex items-center justify-center">
+          <Loader2 className="h-8 w-8 text-primary animate-spin" />
+        </main>
       </div>
     );
   }
   
-  const displayTitle = course.customTitle || course.title;
-  const completedVideos = videos.filter(v => v.status === VideoStatus.COMPLETED).length;
-  const inProgressVideos = videos.filter(v => v.status === VideoStatus.IN_PROGRESS).length;
-  const notStartedVideos = videos.filter(v => v.status === VideoStatus.NOT_STARTED).length;
-  
   return (
-    <div>
-      <div className="flex items-center mb-6">
-        <button 
-          className="mr-3 text-gray-600 hover:text-primary"
-          onClick={handleBackClick}
-        >
-          <ArrowLeft className="h-5 w-5" />
-        </button>
-        <h2 className="text-2xl font-medium">{displayTitle}</h2>
-      </div>
+    <div className="flex min-h-screen flex-col">
+      <Header />
       
-      <div className="flex flex-col lg:flex-row">
-        <div className="lg:w-1/3 mb-6 lg:mb-0 lg:pr-6">
-          <div className="bg-white rounded-lg shadow-md overflow-hidden mb-6">
-            <img 
-              src={course.thumbnail} 
-              alt={displayTitle} 
-              className="w-full h-48 object-cover"
-            />
-            <div className="p-4">
-              <h3 className="font-medium text-xl mb-2">{displayTitle}</h3>
-              <p className="text-gray-600 mb-4 line-clamp-3">{course.description}</p>
-              
-              <div className="flex justify-between mb-3">
-                <div className="flex items-center">
-                  <User className="h-4 w-4 text-gray-600 mr-1" />
-                  <span className="text-gray-600">{course.channelTitle}</span>
-                </div>
-                <div className="flex items-center">
-                  <ListVideo className="h-4 w-4 text-gray-600 mr-1" />
-                  <span className="text-gray-600">{course.videos.length} videos</span>
-                </div>
+      <main className="flex-1 container py-6">
+        {/* Course header */}
+        <div className="flex items-start gap-4 md:gap-6 flex-col md:flex-row mb-8">
+          {/* Back button */}
+          <button 
+            className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors mb-4 md:mb-0"
+            onClick={() => setLocation('/')}
+          >
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            Back to courses
+          </button>
+          
+          {/* Course info */}
+          <div className="flex-1 min-w-0">
+            <h1 className="text-3xl font-bold">{videos[0]?.title.split('|')[0] || 'Course'}</h1>
+            <div className="text-muted-foreground mt-1">{videos[0]?.description}</div>
+            
+            {/* Course stats */}
+            <div className="flex flex-wrap gap-x-6 gap-y-2 mt-4 text-sm">
+              <div className="flex items-center">
+                <ListVideo className="h-4 w-4 mr-1.5 text-muted-foreground" />
+                {videos.length} videos
               </div>
-              
-              <div className="mb-2">
-                <div className="flex justify-between mb-1">
-                  <span className="text-sm font-medium">Course Progress</span>
-                  <span className="text-sm font-medium">{course.progress.percentage}%</span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div 
-                    className="bg-green-500 h-2 rounded-full" 
-                    style={{ width: `${course.progress.percentage}%` }}
-                  ></div>
-                </div>
+              <div className="flex items-center">
+                <Clock className="h-4 w-4 mr-1.5 text-muted-foreground" />
+                {formatDuration(getTotalDuration())} total duration
               </div>
-              
-              <div className="flex flex-wrap gap-2 mt-4">
-                <div className="flex items-center bg-gray-100 rounded-full px-3 py-1 text-sm">
-                  <CheckCircle className="h-3 w-3 mr-1 text-green-500" />
-                  <span>{completedVideos} completed</span>
-                </div>
-                <div className="flex items-center bg-gray-100 rounded-full px-3 py-1 text-sm">
-                  <PlayCircle className="h-3 w-3 mr-1 text-amber-500" />
-                  <span>{inProgressVideos} in progress</span>
-                </div>
-                <div className="flex items-center bg-gray-100 rounded-full px-3 py-1 text-sm">
-                  <Circle className="h-3 w-3 mr-1 text-gray-400" />
-                  <span>{notStartedVideos} not started</span>
-                </div>
+              <div className="flex items-center">
+                <CheckCircle className="h-4 w-4 mr-1.5 text-muted-foreground" />
+                {videos.filter(v => v.status === 'completed').length} completed
               </div>
             </div>
+            
+            {/* Button to continue watching */}
+            <button 
+              className="mt-6 rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-white hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
+              onClick={handleContinue}
+            >
+              <BookOpen className="h-4 w-4" />
+              Continue Learning
+            </button>
           </div>
         </div>
         
-        <div className="lg:w-2/3 bg-white rounded-lg shadow-md overflow-hidden">
-          <div className="p-4 border-b">
-            <h3 className="font-medium text-lg">Video Lessons</h3>
+        {/* Video list */}
+        <div className="border rounded-lg overflow-hidden">
+          <div className="bg-muted p-3 font-medium border-b">
+            Course Videos
           </div>
-          <div className="overflow-y-auto max-h-[600px]">
-            <ul className="divide-y divide-gray-100">
-              {videos.map(video => (
-                <VideoItem 
-                  key={video.id}
-                  video={video}
-                  isActive={video.id === course.progress.currentVideoId}
-                  onClick={handleVideoClick}
-                />
-              ))}
-            </ul>
+          <div className="divide-y">
+            {videos.map(video => (
+              <VideoItem
+                key={video.id}
+                video={video}
+                onClick={handleVideoClick}
+              />
+            ))}
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

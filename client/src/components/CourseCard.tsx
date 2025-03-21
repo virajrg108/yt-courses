@@ -1,8 +1,7 @@
-import React from 'react';
+import { Play, Calendar, Clock } from 'lucide-react';
 import { CourseWithProgress } from '../types';
 import ProgressCircle from './ProgressCircle';
 import { formatDuration, timeAgo } from '../lib/youtube';
-import { PlayCircle, ListVideo, Clock } from 'lucide-react';
 
 interface CourseCardProps {
   course: CourseWithProgress;
@@ -10,60 +9,77 @@ interface CourseCardProps {
 }
 
 export default function CourseCard({ course, onClick }: CourseCardProps) {
-  const displayTitle = course.customTitle || course.title;
-  const totalDuration = course.videos.reduce((total, video) => total + video.duration, 0);
-  const formattedDuration = formatDuration(totalDuration);
-  
-  const lastWatchedText = course.lastWatched 
-    ? timeAgo(course.lastWatched) 
-    : "Not started";
-  
-  const handleClick = () => {
-    onClick(course.id);
+  // Get the total duration of all videos in the course
+  const getTotalDuration = () => {
+    return course.videos.reduce((total, video) => total + video.duration, 0);
   };
+  
+  // Display the time since last watched, or time since added if never watched
+  const getTimeAgo = () => {
+    if (course.lastWatched) {
+      return timeAgo(course.lastWatched);
+    }
+    return timeAgo(course.createdAt);
+  };
+  
+  // Use the custom title if available, otherwise use the original title
+  const displayTitle = course.customTitle || course.title;
   
   return (
     <div 
-      className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-200 cursor-pointer group"
-      onClick={handleClick}
+      className="group border rounded-lg overflow-hidden flex flex-col bg-card transition-all hover:shadow-md cursor-pointer"
+      onClick={() => onClick(course.id)}
     >
-      <div className="relative">
+      {/* Course thumbnail with progress overlay */}
+      <div className="relative aspect-video">
         <img 
           src={course.thumbnail} 
           alt={displayTitle} 
-          className="w-full h-48 object-cover"
+          className="w-full h-full object-cover" 
         />
-        
-        {/* Overlay on hover */}
-        <div className="absolute top-0 left-0 w-full h-full bg-black bg-opacity-20 opacity-0 group-hover:opacity-100 flex justify-center items-center transition-opacity duration-200">
-          <div className="bg-white text-primary rounded-full p-3">
-            <PlayCircle className="h-6 w-6" />
-          </div>
+        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+          <button className="bg-primary text-white rounded-full w-12 h-12 flex items-center justify-center">
+            <Play className="h-6 w-6 ml-1" />
+          </button>
         </div>
         
-        {/* Progress circle */}
-        <div className="absolute top-2 right-2 flex items-center justify-center">
-          <ProgressCircle percentage={course.progress.percentage} />
+        {/* Progress indicator */}
+        <div className="absolute top-2 right-2 bg-background/80 rounded-full p-1 backdrop-blur-sm">
+          <ProgressCircle 
+            percentage={course.progress.percentage} 
+            size={36} 
+            strokeWidth={3}
+            showText={true}
+          />
         </div>
       </div>
       
-      <div className="p-4">
-        <h3 className="font-medium text-lg mb-1 truncate" title={displayTitle}>
+      {/* Course info */}
+      <div className="p-4 flex-grow flex flex-col">
+        <h3 className="font-semibold text-base line-clamp-2 mb-1">
           {displayTitle}
         </h3>
-        <p className="text-gray-600 text-sm mb-3">{course.channelTitle}</p>
+        <p className="text-sm text-muted-foreground line-clamp-2 mb-2">
+          {course.channelTitle}
+        </p>
         
-        <div className="flex justify-between items-center">
+        {/* Course stats */}
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-auto pt-2 text-xs text-muted-foreground">
           <div className="flex items-center">
-            <ListVideo className="h-4 w-4 text-gray-600 mr-1" />
-            <span className="text-sm text-gray-600">
-              {course.videos.length} {course.videos.length === 1 ? 'video' : 'videos'}
-            </span>
+            <Calendar className="h-3.5 w-3.5 mr-1.5" />
+            <span>{getTimeAgo()}</span>
           </div>
           <div className="flex items-center">
-            <Clock className="h-4 w-4 text-gray-600 mr-1" />
-            <span className="text-sm text-gray-600">{lastWatchedText}</span>
+            <Clock className="h-3.5 w-3.5 mr-1.5" />
+            <span>{formatDuration(getTotalDuration())}</span>
           </div>
+        </div>
+        
+        {/* Progress text */}
+        <div className="text-xs mt-2">
+          <span className="text-primary font-medium">
+            {course.progress.completedVideos}/{course.progress.totalVideos} videos completed
+          </span>
         </div>
       </div>
     </div>
