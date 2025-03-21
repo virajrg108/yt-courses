@@ -101,11 +101,38 @@ export function timeAgo(date: string): string {
   }
 }
 
+// Cache for YouTube API key
+let cachedApiKey: string | undefined = undefined;
+
+// Function to get the YouTube API key from the backend
+async function getYouTubeApiKey(): Promise<string> {
+  if (cachedApiKey) {
+    return cachedApiKey;
+  }
+  
+  try {
+    const response = await fetch('/api/config');
+    if (!response.ok) {
+      throw new Error(`Failed to fetch API key: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    if (!data.youtubeApiKey) {
+      throw new Error("YouTube API key not found in server configuration");
+    }
+    
+    cachedApiKey = data.youtubeApiKey;
+    return data.youtubeApiKey;
+  } catch (error) {
+    console.error("Error fetching YouTube API key:", error);
+    throw new Error("Failed to get YouTube API key from server");
+  }
+}
+
 // Fetch all playlist items recursively (handling pagination)
 async function fetchAllPlaylistItems(playlistId: string): Promise<YouTubePlaylistItem[]> {
-  const apiKey = import.meta.env.VITE_YOUTUBE_API_KEY || 
-                 import.meta.env.YOUTUBE_API_KEY;
-                 
+  const apiKey = await getYouTubeApiKey();
+  
   if (!apiKey) {
     throw new Error("YouTube API key is missing. Please provide a valid API key.");
   }
@@ -144,9 +171,8 @@ async function fetchAllPlaylistItems(playlistId: string): Promise<YouTubePlaylis
 
 // Fetch video details (to get duration)
 async function fetchVideosDetails(videoIds: string[]): Promise<Record<string, number>> {
-  const apiKey = import.meta.env.VITE_YOUTUBE_API_KEY || 
-                 import.meta.env.YOUTUBE_API_KEY;
-                 
+  const apiKey = await getYouTubeApiKey();
+  
   if (!apiKey) {
     throw new Error("YouTube API key is missing. Please provide a valid API key.");
   }
@@ -186,9 +212,8 @@ async function fetchVideosDetails(videoIds: string[]): Promise<Record<string, nu
 
 // Fetch playlist info (thumbnail, title)
 async function fetchPlaylistInfo(playlistId: string) {
-  const apiKey = import.meta.env.VITE_YOUTUBE_API_KEY || 
-                 import.meta.env.YOUTUBE_API_KEY;
-                 
+  const apiKey = await getYouTubeApiKey();
+  
   if (!apiKey) {
     throw new Error("YouTube API key is missing. Please provide a valid API key.");
   }
