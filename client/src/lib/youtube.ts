@@ -104,7 +104,6 @@ export function timeAgo(date: string): string {
 // Fetch all playlist items recursively (handling pagination)
 async function fetchAllPlaylistItems(playlistId: string): Promise<YouTubePlaylistItem[]> {
   const apiKey = import.meta.env.VITE_YOUTUBE_API_KEY || 
-                 process.env.YOUTUBE_API_KEY || 
                  import.meta.env.YOUTUBE_API_KEY;
                  
   if (!apiKey) {
@@ -146,7 +145,6 @@ async function fetchAllPlaylistItems(playlistId: string): Promise<YouTubePlaylis
 // Fetch video details (to get duration)
 async function fetchVideosDetails(videoIds: string[]): Promise<Record<string, number>> {
   const apiKey = import.meta.env.VITE_YOUTUBE_API_KEY || 
-                 process.env.YOUTUBE_API_KEY || 
                  import.meta.env.YOUTUBE_API_KEY;
                  
   if (!apiKey) {
@@ -189,7 +187,6 @@ async function fetchVideosDetails(videoIds: string[]): Promise<Record<string, nu
 // Fetch playlist info (thumbnail, title)
 async function fetchPlaylistInfo(playlistId: string) {
   const apiKey = import.meta.env.VITE_YOUTUBE_API_KEY || 
-                 process.env.YOUTUBE_API_KEY || 
                  import.meta.env.YOUTUBE_API_KEY;
                  
   if (!apiKey) {
