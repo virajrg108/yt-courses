@@ -111,7 +111,6 @@ export default function CourseDetails() {
           {/* Course info */}
           <div className="flex-1 min-w-0">
             <h1 className="text-3xl font-bold">{videos[0]?.title.split('|')[0] || 'Course'}</h1>
-            <div className="text-muted-foreground mt-1">{videos[0]?.description}</div>
             
             {/* Course stats */}
             <div className="flex flex-wrap gap-x-6 gap-y-2 mt-4 text-sm">

@@ -94,7 +94,9 @@ export default function YouTubePlayer({
     }
     
     // Create new player
-    playerRef.current = new window.YT.Player(playerElementRef.current, {
+    playerRef.current = new window.YT.Player('youtube-player', {
+      height: '100%', 
+      width: '100%',
       videoId: videoId,
       playerVars: {
         autoplay: 1,
@@ -145,7 +147,7 @@ export default function YouTubePlayer({
           console.error('Error updating time:', error);
         }
       }
-    }, 5000); // Update progress every 5 seconds
+    }, 15000); // Update progress every 15 seconds to reduce interruptions
     
   }, [apiReady, videoId, initialTime, duration, courseId, onTimeUpdate, onVideoComplete, hasNext, onNextVideo]);
   
@@ -180,11 +182,19 @@ export default function YouTubePlayer({
       {/* Video title bar */}
       <div className="bg-muted p-3 flex items-center justify-between">
         <h3 className="font-medium text-sm truncate">{title}</h3>
+        
+        {/* Mark as complete button */}
+        <button 
+          onClick={onVideoComplete}
+          className="text-xs bg-primary text-white px-3 py-1 rounded-full hover:bg-primary/90"
+        >
+          Mark as complete
+        </button>
       </div>
       
       {/* Player container */}
-      <div className="aspect-video bg-black relative">
-        <div ref={playerElementRef} className="absolute inset-0"></div>
+      <div className="aspect-video bg-black relative w-full">
+        <div ref={playerElementRef} id="youtube-player" className="absolute inset-0 w-full h-full"></div>
         
         {/* Loading overlay */}
         {!playerReady && (

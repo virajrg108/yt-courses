@@ -130,19 +130,19 @@ export default function VideoPlayer() {
     <div className="flex min-h-screen flex-col">
       <Header />
       
-      <main className="flex-1 container py-6">
+      <main className="flex-1 container py-4 md:py-6 px-2 md:px-4">
         {/* Back to course link */}
         <button 
-          className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors mb-6"
+          className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors mb-4 md:mb-6"
           onClick={() => setLocation(`/course/${courseId}`)}
         >
           <ArrowLeft className="h-4 w-4 mr-1" />
           Back to course
         </button>
         
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Video player - takes up 2/3 on large screens */}
-          <div className="lg:col-span-2">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
+          {/* Video player - takes up full width on mobile and 2/3 on large screens */}
+          <div className="lg:col-span-2 w-full">
             {courseId && currentVideo && (
               <YouTubePlayer 
                 videoId={currentVideo.id}
@@ -160,8 +160,8 @@ export default function VideoPlayer() {
             )}
           </div>
           
-          {/* Video list - takes up 1/3 on large screens */}
-          <div className="border rounded-lg overflow-hidden h-[calc(100vh-200px)] flex flex-col">
+          {/* Video list - takes up full width on mobile and 1/3 on large screens */}
+          <div className="border rounded-lg overflow-hidden h-[calc(100vh-220px)] md:h-[calc(100vh-200px)] flex flex-col">
             <div className="bg-muted p-3 font-medium border-b flex items-center">
               <ListVideo className="h-4 w-4 mr-2" />
               Course Videos
