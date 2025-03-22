@@ -85,70 +85,95 @@ export default function YouTubePlayer({
   
   // Initialize player when API is ready and videoId changes
   useEffect(() => {
-    if (!apiReady || !videoId || !playerElementRef.current) return;
+    if (!apiReady || !videoId) return;
     
-    // Clean up existing player
-    if (playerRef.current) {
-      playerRef.current.destroy();
-      playerRef.current = null;
-    }
+    // A flag to control initialization
+    let shouldInitialize = true;
     
-    // Create new player
-    playerRef.current = new window.YT.Player('youtube-player', {
-      height: '100%', 
-      width: '100%',
-      videoId: videoId,
-      playerVars: {
-        autoplay: 1,
-        modestbranding: 1,
-        rel: 0,
-        start: Math.floor(initialTime || 0),
-      },
-      events: {
-        onReady: () => {
-          setPlayerReady(true);
+    // Only initialize once
+    if (!playerRef.current) {
+      // Create new player
+      playerRef.current = new window.YT.Player('youtube-player', {
+        height: '100%', 
+        width: '100%',
+        videoId: videoId,
+        playerVars: {
+          autoplay: 1,
+          modestbranding: 1,
+          rel: 0,
+          start: Math.floor(initialTime || 0),
         },
-        onStateChange: (event: any) => {
-          // Handle video complete
-          if (event.data === window.YT.PlayerState.ENDED) {
-            onVideoComplete();
-            
-            // Auto-play next video if available
-            if (hasNext && onNextVideo) {
-              setTimeout(() => {
-                onNextVideo();
-              }, 1500);
+        events: {
+          onReady: () => {
+            setPlayerReady(true);
+          },
+          onStateChange: (event: any) => {
+            // Handle video complete
+            if (event.data === window.YT.PlayerState.ENDED) {
+              onVideoComplete();
+              
+              // Auto-play next video if available
+              if (hasNext && onNextVideo) {
+                setTimeout(() => {
+                  onNextVideo();
+                }, 1500);
+              }
             }
-          }
+          },
         },
-      },
-    });
-    
-    // Set up interval to update time
-    if (timeUpdateIntervalRef.current) {
-      window.clearInterval(timeUpdateIntervalRef.current);
-    }
-    
-    timeUpdateIntervalRef.current = window.setInterval(() => {
-      if (playerRef.current?.getCurrentTime) {
-        try {
-          const currentTime = playerRef.current.getCurrentTime() || 0;
-          const videoDuration = playerRef.current.getDuration() || duration;
-          const progress: VideoProgress = {
-            videoId,
-            courseId,
-            currentTime,
-            duration: videoDuration,
-            completed: currentTime >= videoDuration * 0.95, // Mark as complete if watched 95%
-            lastWatched: new Date().toISOString(),
-          };
-          onTimeUpdate(progress);
-        } catch (error) {
-          console.error('Error updating time:', error);
+      });
+    } else {
+      // If player already exists, just load the new video at the initial time
+      try {
+        if (playerRef.current.loadVideoById) {
+          playerRef.current.loadVideoById({
+            videoId: videoId,
+            startSeconds: Math.floor(initialTime || 0)
+          });
+        }
+      } catch (error) {
+        console.error('Error loading video:', error);
+        // If loading fails, we'll need to reinitialize
+        if (playerRef.current) {
+          playerRef.current.destroy();
+          playerRef.current = null;
+          shouldInitialize = true;
         }
       }
-    }, 15000); // Update progress every 15 seconds to reduce interruptions
+    }
     
+    // Set up interval to update time if not already set
+    if (!timeUpdateIntervalRef.current) {
+      timeUpdateIntervalRef.current = window.setInterval(() => {
+        if (playerRef.current?.getCurrentTime) {
+          try {
+            const currentTime = playerRef.current.getCurrentTime() || 0;
+            const videoDuration = playerRef.current.getDuration() || duration;
+            const progress: VideoProgress = {
+              videoId,
+              courseId,
+              currentTime,
+              duration: videoDuration,
+              completed: currentTime >= videoDuration * 0.95, // Mark as complete if watched 95%
+              lastWatched: new Date().toISOString(),
+            };
+            onTimeUpdate(progress);
+          } catch (error) {
+            console.error('Error updating time:', error);
+          }
+        }
+      }, 15000); // Update progress every 15 seconds to reduce interruptions
+    }
+    
+    // Clean up on unmount
+    return () => {
+      // Don't destroy the player on every videoId change,
+      // only clear the interval if component unmounts
+      if (timeUpdateIntervalRef.current) {
+        window.clearInterval(timeUpdateIntervalRef.current);
+        timeUpdateIntervalRef.current = null;
+      }
+    };
   }, [apiReady, videoId, initialTime, duration, courseId, onTimeUpdate, onVideoComplete, hasNext, onNextVideo]);
   
   // Handle full screen changes

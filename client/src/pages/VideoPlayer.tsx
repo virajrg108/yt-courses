@@ -10,7 +10,8 @@ import { VideoWithProgress } from '../types';
 export default function VideoPlayer() {
   const [match, params] = useRoute('/course/:courseId/video/:videoId');
   const [location, setLocation] = useLocation();
-  const { getVideo, updateVideoProgress, markVideoCompleted, getNextVideo } = useCourses();
+  const coursesContext = useCourses();
+  const { getVideo, updateVideoProgress, markVideoCompleted, getNextVideo, getCourse } = coursesContext;
   
   const [isLoading, setIsLoading] = useState(true);
   const [currentVideo, setCurrentVideo] = useState<VideoWithProgress | null>(null);
@@ -43,7 +44,7 @@ export default function VideoPlayer() {
         setCurrentVideo(video);
         
         // Load the course and all its videos
-        const course = await useCourses().getCourse(courseId);
+        const course = await getCourse(courseId);
         
         if (!course) {
           setLocation('/');
@@ -82,7 +83,7 @@ export default function VideoPlayer() {
     };
     
     loadVideoData();
-  }, [courseId, videoId, getVideo, setLocation]);
+  }, [courseId, videoId, getVideo, getCourse, setLocation]);
   
   // Handler for video progress updates
   const handleTimeUpdate = (progress: any) => {
@@ -90,9 +91,28 @@ export default function VideoPlayer() {
   };
   
   // Handler for video completion
-  const handleVideoComplete = () => {
+  const handleVideoComplete = async () => {
     if (courseId && videoId) {
-      markVideoCompleted(courseId, videoId);
+      try {
+        await markVideoCompleted(courseId, videoId);
+        
+        // Refresh the video data to update UI
+        const updatedVideo = await getVideo(courseId, videoId);
+        if (updatedVideo) {
+          setCurrentVideo(updatedVideo);
+        }
+        
+        // Reload the course videos to update completion status in the list
+        const courseData = await getCourse(courseId);
+        if (courseData) {
+          const updatedVideos = await Promise.all(
+            courseData.videos.map(v => getVideo(courseId, v.id))
+          );
+          setCourseVideos(updatedVideos.filter(Boolean) as VideoWithProgress[]);
+        }
+      } catch (error) {
+        console.error('Error marking video as complete:', error);
+      }
     }
   };
   
