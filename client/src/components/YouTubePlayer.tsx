@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Check } from 'lucide-react';
 import { VideoProgress } from '../types';
 
@@ -16,9 +16,6 @@ interface YouTubePlayerProps {
   hasPrevious?: boolean;
 }
 
-let PLAYER_CONTAINER_ID = 'youtube-player-container';
-
-// Use a stable iframe that avoids re-creation during React re-renders
 export default function YouTubePlayer({
   videoId,
   courseId,
@@ -35,179 +32,88 @@ export default function YouTubePlayer({
   const containerRef = useRef<HTMLDivElement>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
-  const videoIdRef = useRef(videoId);
-  const initialTimeRef = useRef(initialTime);
-  const saveIntervalRef = useRef<number | undefined>();
-  const progressRef = useRef<VideoProgress>({
-    videoId,
-    courseId,
-    currentTime: initialTime || 0,
-    duration,
-    completed: false,
-    lastWatched: new Date().toISOString(),
-  });
   
-  // Only used to track current values for callbacks
+  // Use a direct link to YouTube using the nocookie domain
+  const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&start=${Math.floor(initialTime || 0)}&rel=0&modestbranding=1`;
+  
+  // Track elapsed time for progress updates
+  const lastTimeRef = useRef<number>(initialTime || 0);
+  const progressIntervalRef = useRef<number | null>(null);
+  
+  // Set up progress tracking only once
   useEffect(() => {
-    videoIdRef.current = videoId;
-    initialTimeRef.current = initialTime || 0;
-    progressRef.current = {
-      ...progressRef.current,
-      videoId,
-      courseId,
-      currentTime: initialTime || 0,
-      duration,
-    };
-  }, [videoId, initialTime, courseId, duration]);
-  
-  // Create the player component only once on mount
-  const createPlayer = useCallback(() => {
-    // Ensure we don't have multiple intervals running
-    if (saveIntervalRef.current) {
-      window.clearInterval(saveIntervalRef.current);
+    // Clear any existing interval
+    if (progressIntervalRef.current) {
+      window.clearInterval(progressIntervalRef.current);
     }
     
-    // Reset loading state
-    setIsLoading(true);
-    setHasError(false);
+    // Reset current time when video changes
+    lastTimeRef.current = initialTime || 0;
     
-    // Create the YouTube iframe embed
-    try {
-      // Create a static embed URL with query parameters
-      const embedUrl = `https://www.youtube.com/embed/${videoIdRef.current}?autoplay=1&start=${Math.floor(initialTimeRef.current || 0)}&enablejsapi=1&rel=0&modestbranding=1`;
+    // Set up a new interval for progress tracking
+    progressIntervalRef.current = window.setInterval(() => {
+      // Increment the time by 5 seconds (or less if nearing the end)
+      lastTimeRef.current += 5;
       
-      // Get the container element or create it if it doesn't exist
-      let container = document.getElementById(PLAYER_CONTAINER_ID);
+      // Check if we've reached the end of the video
+      const isComplete = lastTimeRef.current >= duration * 0.95;
       
-      if (!container && containerRef.current) {
-        // If we need to create the container div
-        const playerContainer = document.getElementById('player-container');
-        if (playerContainer) {
-          // Clear existing content
-          playerContainer.innerHTML = '';
-          
-          // Create the stable container
-          container = document.createElement('div');
-          container.id = PLAYER_CONTAINER_ID;
-          container.style.width = '100%';
-          container.style.height = '100%';
-          
-          // Append to the player container
-          playerContainer.appendChild(container);
-        }
+      // Create progress object
+      const progress: VideoProgress = {
+        videoId,
+        courseId,
+        currentTime: lastTimeRef.current,
+        duration,
+        completed: isComplete,
+        lastWatched: new Date().toISOString(),
+      };
+      
+      // Update progress
+      onTimeUpdate(progress);
+      
+      // Auto-mark as complete if we've reached the end
+      if (isComplete && lastTimeRef.current < duration) {
+        onVideoComplete();
       }
-      
-      if (container) {
-        // Create the iframe element
-        const iframe = document.createElement('iframe');
-        iframe.width = '100%';
-        iframe.height = '100%';
-        iframe.src = embedUrl;
-        iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
-        iframe.allowFullscreen = true;
-        iframe.style.border = 'none';
-        iframe.onload = () => {
-          setIsLoading(false);
-        };
-        
-        // Clear existing content and add the iframe
-        container.innerHTML = '';
-        container.appendChild(iframe);
-        
-        // Start a timer to save progress periodically
-        saveIntervalRef.current = window.setInterval(() => {
-          // Update the progress time by adding 5 seconds
-          progressRef.current.currentTime += 5;
-          
-          // Check if video is complete (95% watched)
-          progressRef.current.completed = progressRef.current.currentTime >= duration * 0.95;
-          
-          // Update the last watched timestamp
-          progressRef.current.lastWatched = new Date().toISOString();
-          
-          // Save the progress
-          onTimeUpdate(progressRef.current);
-        }, 5000);
-      }
-    } catch (error) {
-      console.error('Error creating YouTube player:', error);
-      setHasError(true);
-      setIsLoading(false);
-    }
-  }, [onTimeUpdate, duration]);
-  
-  // Apply the video ID change - this avoids recreating the component
-  const updatePlayer = useCallback(() => {
-    try {
-      // Get the container 
-      const container = document.getElementById(PLAYER_CONTAINER_ID);
-      
-      if (container) {
-        // Create a new iframe with the updated video ID and time
-        const iframe = document.createElement('iframe');
-        iframe.width = '100%';
-        iframe.height = '100%';
-        iframe.src = `https://www.youtube.com/embed/${videoIdRef.current}?autoplay=1&start=${Math.floor(initialTimeRef.current || 0)}&enablejsapi=1&rel=0&modestbranding=1`;
-        iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
-        iframe.allowFullscreen = true;
-        iframe.style.border = 'none';
-        iframe.onload = () => {
-          setIsLoading(false);
-        };
-        
-        // Reset loading state
-        setIsLoading(true);
-        
-        // Clear and update the container
-        container.innerHTML = '';
-        container.appendChild(iframe);
-      }
-    } catch (error) {
-      console.error('Error updating YouTube player:', error);
-      setHasError(true);
-    }
-  }, []);
-  
-  // Initialize the player on mount
-  useEffect(() => {
-    createPlayer();
+    }, 5000);
     
-    // Cleanup function to clear the interval
+    // Clean up interval on unmount or video change
     return () => {
-      if (saveIntervalRef.current) {
-        window.clearInterval(saveIntervalRef.current);
-        saveIntervalRef.current = undefined;
+      if (progressIntervalRef.current) {
+        window.clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
       }
     };
-  }, [createPlayer]);
+  }, [videoId, courseId, initialTime, duration, onTimeUpdate, onVideoComplete]);
   
-  // Handle video ID changes
-  useEffect(() => {
-    // If the video ID has changed, update the player
-    if (videoIdRef.current !== videoId) {
-      videoIdRef.current = videoId;
-      initialTimeRef.current = initialTime || 0;
-      updatePlayer();
-    }
-  }, [videoId, initialTime, updatePlayer]);
-  
-  // Toggle fullscreen
-  const toggleFullScreen = () => {
-    if (!containerRef.current) return;
-    
-    if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen().catch(err => {
-        console.error('Error attempting to enable full-screen mode:', err);
-      });
-    } else {
-      document.exitFullscreen();
-    }
+  // Handle loading state
+  const handleIframeLoad = () => {
+    setIsLoading(false);
   };
   
   // Handle video marking as complete
   const handleMarkComplete = (e: React.MouseEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     onVideoComplete();
+  };
+  
+  // Handle previous video
+  const handlePreviousVideo = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (onPreviousVideo) {
+      onPreviousVideo();
+    }
+  };
+  
+  // Handle next video
+  const handleNextVideo = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (onNextVideo) {
+      onNextVideo();
+    }
   };
   
   return (
@@ -231,7 +137,15 @@ export default function YouTubePlayer({
       
       {/* Player container */}
       <div className="aspect-video bg-black relative w-full">
-        <div id="player-container" className="absolute inset-0 w-full h-full"></div>
+        {/* Static iframe */}
+        <iframe
+          className="absolute inset-0 w-full h-full"
+          src={embedUrl}
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowFullScreen
+          style={{ border: 'none' }}
+          onLoad={handleIframeLoad}
+        ></iframe>
         
         {/* Loading overlay */}
         {isLoading && (
@@ -258,7 +172,7 @@ export default function YouTubePlayer({
           {/* Previous button */}
           {hasPrevious && (
             <button 
-              onClick={onPreviousVideo}
+              onClick={handlePreviousVideo}
               className="pointer-events-auto bg-black/70 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-black/90 transition-colors"
             >
               <ChevronLeft className="h-6 w-6" />
@@ -271,7 +185,7 @@ export default function YouTubePlayer({
           {/* Next button */}
           {hasNext && (
             <button 
-              onClick={onNextVideo}
+              onClick={handleNextVideo}
               className="pointer-events-auto bg-black/70 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-black/90 transition-colors"
             >
               <ChevronRight className="h-6 w-6" />
