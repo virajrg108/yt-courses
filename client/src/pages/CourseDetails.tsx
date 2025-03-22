@@ -145,9 +145,9 @@ export default function CourseDetails() {
             Course Videos
           </div>
           <div className="divide-y">
-            {videos.map(video => (
+            {videos.map((video, index) => (
               <VideoItem
-                key={video.id}
+                key={`${video.id}-${index}`}
                 video={video}
                 onClick={handleVideoClick}
               />

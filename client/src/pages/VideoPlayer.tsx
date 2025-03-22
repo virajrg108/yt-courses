@@ -29,60 +29,82 @@ export default function VideoPlayer() {
       return;
     }
     
+    let isMounted = true;
+    
     const loadVideoData = async () => {
+      if (!isMounted) return;
       setIsLoading(true);
       
       try {
-        // Load the current video
+        // First, quickly fetch just the current video to show it faster
         const video = await getVideo(courseId, videoId);
+        
+        if (!isMounted) return;
         
         if (!video) {
           setLocation(`/course/${courseId}`);
           return;
         }
         
+        // Set the current video immediately so playback can start
         setCurrentVideo(video);
         
-        // Load the course and all its videos
+        // In the background, load the course and all its videos
         const course = await getCourse(courseId);
+        
+        if (!isMounted) return;
         
         if (!course) {
           setLocation('/');
           return;
         }
         
-        // Load all videos with their progress
+        // Create a set of promises to load all videos with their progress
+        // but don't await them yet
         const videoPromises = course.videos.map(v => 
           getVideo(courseId, v.id)
         );
         
-        const loadedVideos = await Promise.all(videoPromises);
-        const filteredVideos = loadedVideos.filter(Boolean) as VideoWithProgress[];
-        setCourseVideos(filteredVideos);
+        // Load videos in the background
+        Promise.all(videoPromises).then((loadedVideos) => {
+          if (!isMounted) return;
+          
+          const filteredVideos = loadedVideos.filter(Boolean) as VideoWithProgress[];
+          setCourseVideos(filteredVideos);
+          
+          // Find current video index
+          const currentIndex = filteredVideos.findIndex(v => v.id === videoId);
+          
+          // Determine next and previous videos
+          if (currentIndex > 0) {
+            setPreviousVideo(filteredVideos[currentIndex - 1]);
+          } else {
+            setPreviousVideo(null);
+          }
+          
+          if (currentIndex < filteredVideos.length - 1) {
+            setNextVideo(filteredVideos[currentIndex + 1]);
+          } else {
+            setNextVideo(null);
+          }
+        }).catch(error => {
+          console.error('Error loading course videos:', error);
+        });
         
-        // Find current video index
-        const currentIndex = filteredVideos.findIndex(v => v.id === videoId);
-        
-        // Determine next and previous videos
-        if (currentIndex > 0) {
-          setPreviousVideo(filteredVideos[currentIndex - 1]);
-        } else {
-          setPreviousVideo(null);
-        }
-        
-        if (currentIndex < filteredVideos.length - 1) {
-          setNextVideo(filteredVideos[currentIndex + 1]);
-        } else {
-          setNextVideo(null);
-        }
+        // We can mark loading as false once we have the current video
+        setIsLoading(false);
       } catch (error) {
+        if (!isMounted) return;
         console.error('Error loading video data:', error);
-      } finally {
         setIsLoading(false);
       }
     };
     
     loadVideoData();
+    
+    return () => {
+      isMounted = false;
+    };
   }, [courseId, videoId, getVideo, getCourse, setLocation]);
   
   // Handler for video progress updates
@@ -188,9 +210,9 @@ export default function VideoPlayer() {
             </div>
             <div className="overflow-y-auto flex-1">
               <div className="divide-y">
-                {courseVideos.map(video => (
+                {courseVideos.map((video, index) => (
                   <VideoItem
-                    key={video.id}
+                    key={`${video.id}-${index}`}
                     video={video}
                     isActive={video.id === currentVideo.id}
                     onClick={handleVideoClick}
