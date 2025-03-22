@@ -5,7 +5,7 @@ import Header from '../components/Header';
 import { useCourses } from '../contexts/CoursesContext';
 import YouTubePlayer from '../components/YouTubePlayer';
 import VideoItem from '../components/VideoItem';
-import { VideoWithProgress } from '../types';
+import { VideoWithProgress, VideoProgress, VideoStatus } from '../types';
 
 export default function VideoPlayer() {
   const [match, params] = useRoute('/course/:courseId/video/:videoId');
@@ -108,33 +108,56 @@ export default function VideoPlayer() {
   }, [courseId, videoId, getVideo, getCourse, setLocation]);
   
   // Handler for video progress updates
-  const handleTimeUpdate = (progress: any) => {
+  const handleTimeUpdate = (progress: VideoProgress) => {
+    if (!progress || !progress.videoId || !progress.courseId) return;
+    
+    // Don't trigger UI updates, just save in the background
     updateVideoProgress(progress);
+    
+    // Silently update the current video's progress if it matches
+    if (currentVideo && progress.videoId === currentVideo.id) {
+      setCurrentVideo(prev => {
+        if (!prev) return prev;
+        
+        return {
+          ...prev,
+          currentTime: progress.currentTime,
+          progress: Math.round((progress.currentTime / progress.duration) * 100),
+        };
+      });
+    }
   };
   
   // Handler for video completion
   const handleVideoComplete = async () => {
-    if (courseId && videoId) {
-      try {
-        await markVideoCompleted(courseId, videoId);
+    if (!courseId || !videoId) return;
+    
+    try {
+      await markVideoCompleted(courseId, videoId);
+      
+      // Only update the current video status to completed without full refresh
+      if (currentVideo) {
+        // Create an updated version of the current video
+        const updatedVideo: VideoWithProgress = {
+          ...currentVideo,
+          status: VideoStatus.COMPLETED,
+          progress: 100,
+        };
         
-        // Refresh the video data to update UI
-        const updatedVideo = await getVideo(courseId, videoId);
-        if (updatedVideo) {
-          setCurrentVideo(updatedVideo);
-        }
+        // Update state without fetching from the database
+        setCurrentVideo(updatedVideo);
         
-        // Reload the course videos to update completion status in the list
-        const courseData = await getCourse(courseId);
-        if (courseData) {
-          const updatedVideos = await Promise.all(
-            courseData.videos.map(v => getVideo(courseId, v.id))
-          );
-          setCourseVideos(updatedVideos.filter(Boolean) as VideoWithProgress[]);
-        }
-      } catch (error) {
-        console.error('Error marking video as complete:', error);
+        // Update the video in the course videos list without full refresh
+        setCourseVideos(prev => 
+          prev.map(video => 
+            video.id === videoId 
+              ? updatedVideo 
+              : video
+          )
+        );
       }
+    } catch (error) {
+      console.error('Error marking video as complete:', error);
     }
   };
   
