@@ -49,7 +49,7 @@ export default function Home() {
     <div className="flex min-h-screen flex-col">
       <Header />
       
-      <main className="flex-1 container py-6">
+      <main className="flex-1 container py-6 mx-auto">
         {/* Add course button */}
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold">Your Courses</h1>

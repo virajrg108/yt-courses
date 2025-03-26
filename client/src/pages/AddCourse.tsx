@@ -67,7 +67,7 @@ export default function AddCourse() {
     <div className="flex min-h-screen flex-col">
       <Header />
       
-      <main className="flex-1 container py-8">
+      <main className="flex-1 container py-8 mx-auto">
         <div className="mx-auto max-w-md">
           <div className="mb-6 text-center">
             <h1 className="text-3xl font-bold">Add New Course</h1>

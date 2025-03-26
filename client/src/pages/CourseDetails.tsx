@@ -96,7 +96,7 @@ export default function CourseDetails() {
     <div className="flex min-h-screen flex-col">
       <Header />
       
-      <main className="flex-1 container py-6">
+      <main className="flex-1 container py-6 mx-auto">
         {/* Course header */}
         <div className="flex items-start gap-4 md:gap-6 flex-col md:flex-row mb-8">
           {/* Back button */}
