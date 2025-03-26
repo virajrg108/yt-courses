@@ -180,6 +180,7 @@ export function CoursesProvider({ children }: { children: ReactNode }) {
 
   // Update video progress
   const updateVideoProgress = async (progress: VideoProgress): Promise<void> => {
+    console.log("updateVicdeoProgress called");
     try {
       await db.updateVideoProgress(progress);
       
